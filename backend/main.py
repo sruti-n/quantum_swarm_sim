@@ -25,7 +25,7 @@ FRONTEND_FILE = os.path.join(PROJECT_ROOT, "frontend", "index.html")
 MIN_SHOTS = 1
 MAX_SHOTS = 4096
 
-MIN_ROBOTS = 4
+MIN_ROBOTS = 1
 MAX_ROBOTS = 20
 
 VALID_GATES = ('h', 'x', 'id', 'sx', 'y', 'z')

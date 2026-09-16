@@ -43,7 +43,7 @@ on a different port, the WebSocket follows automatically.
 | Reset | `R` |
 | Toggle Entanglement mode | `E` |
 | Noise rate ± 0.05 | `↑` / `↓` |
-| Add / remove a robot (4–20) | `+` / `-` |
+| Add / remove a robot (1–20; Entanglement needs 2+) | `+` / `-` |
 | Halve / double shots (1–4096, default 256) | `[` / `]` |
 
 ## Project Structure

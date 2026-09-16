@@ -343,8 +343,8 @@
 
     <div class="field">
       <label for="robotCount">Robots <span class="hint">+ / −</span></label>
-      <input type="number" id="robotCount" min="4" max="20" value="4">
-      <input type="range" id="robotRange" min="4" max="20" value="4" style="margin-top:6px">
+      <input type="number" id="robotCount" min="1" max="20" value="4">
+      <input type="range" id="robotRange" min="1" max="20" value="4" style="margin-top:6px">
       <div class="warn" id="robotWarn">Performance may degrade above 15 robots on a standard laptop.</div>
     </div>
 
@@ -419,7 +419,7 @@
   "use strict";
 
   // ---------- constants ----------
-  var MIN_ROBOTS = 4, MAX_ROBOTS = 20, WARN_ROBOTS = 15;
+  var MIN_ROBOTS = 1, MIN_ENTANGLED_ROBOTS = 2, MAX_ROBOTS = 20, WARN_ROBOTS = 15;
   // Shots slider steps through powers of two: 2^0 = 1 up to 2^12 = 4096.
   var MIN_SHOTS_EXP = 0, MAX_SHOTS_EXP = 12, DEFAULT_SHOTS_EXP = 8;
   var IDEAL = {
@@ -515,49 +515,85 @@
     return '#4da3ff';
   }
 
-  function drawRobot(r) {
-    var col = colorFor(r);
+  // ---------- vehicle shape ----------
+  // Braitenberg-style vehicle drawn in local space with the front facing +x:
+  // 24px long (rear x = -12, front x = +12) by 16px across at scale 1.
+  var VEHICLE_HALF_LEN = 12, VEHICLE_HALF_WID = 8;
 
-    // trail
+  // Full size up to 8 robots, easing down to 75% at the 20-robot cap.
+  function vehicleScale() {
+    return state.count <= 8 ? 1 : Math.max(0.75, 1 - (state.count - 8) * 0.021);
+  }
+
+  function vehicleBodyPath() {
+    var L = VEHICLE_HALF_LEN, W = VEHICLE_HALF_WID, c = 2.5;  // c: front corner radius
+    ctx.beginPath();
+    ctx.moveTo(-4, -W);
+    ctx.lineTo(L - c, -W);
+    ctx.quadraticCurveTo(L, -W, L, -W + c);
+    ctx.lineTo(L, W - c);                                     // flat front edge
+    ctx.quadraticCurveTo(L, W, L - c, W);
+    ctx.lineTo(-4, W);
+    ctx.bezierCurveTo(-L - 3, W, -L - 3, -W, -4, -W);         // rounded rear, apex at x ≈ -12
+    ctx.closePath();
+  }
+
+  function drawVehicle(x, y, heading, fill, alpha) {
+    var s = vehicleScale();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(heading);
+    ctx.scale(s, s);
+
+    vehicleBodyPath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = 1 / s;
+    ctx.strokeStyle = 'rgba(2,4,10,0.55)';
+    ctx.stroke();
+
+    // sensor "eyes" on the front edge, one each side
+    [-4.5, 4.5].forEach(function (sy) {
+      ctx.beginPath();
+      ctx.arc(VEHICLE_HALF_LEN - 1.5, sy, 2.1, 0, Math.PI * 2);
+      ctx.fillStyle = '#f4f7ff';
+      ctx.fill();
+      ctx.lineWidth = 1 / s;
+      ctx.strokeStyle = 'rgba(2,4,10,0.7)';
+      ctx.stroke();
+    });
+
+    ctx.restore();
+  }
+
+  // Center of the rear edge in world space — where the trail is laid down.
+  function vehicleRear(r) {
+    var back = VEHICLE_HALF_LEN * vehicleScale();
+    return { x: r.x - Math.cos(r.heading) * back, y: r.y - Math.sin(r.heading) * back };
+  }
+
+  function drawRobot(r) {
+    // trail; a jump longer than 40px is a wrap across the canvas edge, so break the line there
     if (r.trail.length > 1) {
       ctx.beginPath();
       ctx.moveTo(r.trail[0].x, r.trail[0].y);
-      for (var i = 1; i < r.trail.length; i++) ctx.lineTo(r.trail[i].x, r.trail[i].y);
+      for (var i = 1; i < r.trail.length; i++) {
+        var p = r.trail[i], q = r.trail[i - 1];
+        if (Math.abs(p.x - q.x) > 40 || Math.abs(p.y - q.y) > 40) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
       ctx.strokeStyle = 'rgba(120,160,220,0.13)';
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
 
-    // ghost: where the robot would sit with zero noise
+    // ghost: the same vehicle at 20% opacity, facing where it would with zero noise
     if (r.ghostDeg !== null) {
-      var g = (r.ghostDeg - 90) * Math.PI / 180;
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, 9, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(140,155,190,0.38)';
-      ctx.setLineDash([2, 3]);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(r.x, r.y);
-      ctx.lineTo(r.x + Math.cos(g) * 17, r.y + Math.sin(g) * 17);
-      ctx.strokeStyle = 'rgba(140,155,190,0.38)';
-      ctx.stroke();
+      drawVehicle(r.x, r.y, (r.ghostDeg - 90) * Math.PI / 180, '#c9d3ea', 0.2);
     }
 
-    // body
-    ctx.beginPath();
-    ctx.arc(r.x, r.y, 7, 0, Math.PI * 2);
-    ctx.fillStyle = col;
-    ctx.fill();
-
-    // directional needle
-    ctx.beginPath();
-    ctx.moveTo(r.x, r.y);
-    ctx.lineTo(r.x + Math.cos(r.heading) * 15, r.y + Math.sin(r.heading) * 15);
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    drawVehicle(r.x, r.y, r.heading, colorFor(r), 1);
   }
 
   function drawPairLinks() {
@@ -596,7 +632,8 @@
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
     r.x += r.vx; r.y += r.vy;
     wrap(r, w, h);
-    r.heading += (Math.random() - 0.5) * 0.3;
+    // the vehicle now has an obvious front, so steer it to face where it is driving
+    r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15 + (Math.random() - 0.5) * 0.08;
   }
 
   function stepBoidsPair(r, partner, w, h) {
@@ -611,15 +648,24 @@
     // separation
     if (d < 46) { r.vx -= (dx / d) * 0.08; r.vy -= (dy / d) * 0.08; }
 
-    // alignment: pair shares a heading, degraded by noise (decoherence)
-    var drift = state.noise * 0.55;
-    var target = partner.heading + (Math.random() - 0.5) * drift;
-    r.heading += angleDelta(r.heading, target) * 0.05;
+    // alignment: the pair matches velocities, degraded by noise (decoherence)
+    r.vx += (partner.vx - r.vx) * 0.05;
+    r.vy += (partner.vy - r.vy) * 0.05;
+    var jitter = (Math.random() - 0.5) * state.noise * 0.16;
+    var cj = Math.cos(jitter), sj = Math.sin(jitter);
+    var jvx = r.vx * cj - r.vy * sj;
+    r.vy = r.vx * sj + r.vy * cj;
+    r.vx = jvx;
 
-    var sp = Math.hypot(r.vx, r.vy), max = 1.5;
+    // keep cruising so a balanced pair never stalls with no direction
+    var sp = Math.hypot(r.vx, r.vy), max = 1.5, min = 0.6;
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
+    else if (sp < min && sp > 0.001) { r.vx = r.vx / sp * min; r.vy = r.vy / sp * min; }
     r.x += r.vx; r.y += r.vy;
     wrap(r, w, h);
+
+    // the vehicle faces the way it is driving
+    r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
   }
 
   function angleDelta(from, to) {
@@ -654,7 +700,7 @@
       } else if (state.phase === 'measured') stepMeasured(r);
 
       if (state.phase !== 'idle') {
-        r.trail.push({ x: r.x, y: r.y });
+        r.trail.push(vehicleRear(r));
         if (r.trail.length > 26) r.trail.shift();
       }
     });
@@ -939,17 +985,27 @@
     setControlsEnabled(ws && ws.readyState === WebSocket.OPEN);
   }
 
+  // Entanglement needs a pair of qubits, so that mode requires at least 2 robots.
+  function minRobots() {
+    return state.mode === 'entanglement' ? MIN_ENTANGLED_ROBOTS : MIN_ROBOTS;
+  }
+
   function setMode(mode) {
     state.mode = mode;
     shotsNote.style.display = mode === 'entanglement' ? 'block' : 'none';
     modeSuper.classList.toggle('active', mode === 'superposition');
     modeEnt.classList.toggle('active', mode === 'entanglement');
+    countInput.min = minRobots();
+    countRange.min = minRobots();
+    var raised = state.count < minRobots();
+    if (raised) setCount(minRobots());
     doReset();
     refreshExplanation();
+    if (raised) setStatus('Entanglement needs a pair of qubits, so the robot count was raised to 2.');
   }
 
   function setCount(n) {
-    n = Math.max(MIN_ROBOTS, Math.min(MAX_ROBOTS, n | 0));
+    n = Math.max(minRobots(), Math.min(MAX_ROBOTS, n | 0));
     state.count = n;
     countInput.value = n;
     countRange.value = n;
