@@ -1,0 +1,533 @@
+# Quantum Swarm Simulation — System Specification
+**Project:** Bridging the Quantum Gap: A Robotic Modeling System for Visualizing
+Decoherence and Qubit Behaviors
+**Author:** Sruti Nallakukkala
+**Institution:** Princeton International School of Mathematics and Science (PRISMS)
+**Stage:** Simulation (Stage 1 of 2 — Physical prototype is Stage 2)
+**Last Updated:** September 2026
+
+---
+
+## 1. Project Purpose
+
+This simulation is the first dimension of a two-stage research project. It
+demonstrates quantum computing concepts — superposition, entanglement, and
+decoherence — through the behavior of a swarm of simulated robots. Each robot
+acts as a physical analog of a qubit. The simulation is designed to be
+intuitively legible to users with no quantum background, while also being
+scientifically grounded through a live Qiskit backend.
+
+The simulation fulfills the pedagogical goals of the project by engaging users
+at the Analyze and Evaluate levels of Bloom's Taxonomy: users do not just watch,
+they interact, make choices, and observe consequences.
+
+---
+
+## 2. System Architecture
+
+The system is split into two layers that communicate over a WebSocket connection.
+
+```
+[ Python Backend ]  <——WebSocket——>  [ Browser Frontend ]
+  - FastAPI server                     - HTML5 Canvas
+  - Qiskit / Qiskit Aer                - Vanilla JavaScript
+  - Quantum circuit simulation         - Robot swarm rendering
+  - Noise model (depolarizing error)   - Boids algorithm
+  - Gate logic                         - User interaction layer
+  - Data logging to CSV                - Explanation panel
+```
+
+### Why this architecture
+The Python backend already exists in the project (quantum_robot.py,
+superposition_test_bridge.py, qiskit_test_bridge.py). The browser frontend
+replaces the Arduino/serial layer with a visual simulation layer. The
+communication pattern is identical in concept: Python computes a quantum
+result, sends it outward, the receiver acts on it. The serial port becomes
+a WebSocket.
+
+---
+
+## 3. Quantum Backend (Python / FastAPI)
+
+### 3.1 Supported Quantum Gates
+The following gates are supported, carried over directly from quantum_robot.py:
+
+| Gate | ID  | Ideal P(|1⟩) | Ideal Angle | Description                        |
+|------|-----|--------------|-------------|------------------------------------|
+| Hadamard | h | 0.5       | 90°         | Creates superposition              |
+| Pauli-X  | x | 1.0       | 180°        | Flips qubit state                  |
+| Identity | id | 0.0      | 0°          | Does nothing to the qubit          |
+| √X   | sx  | 0.5          | 90°         | Half-flip, partial superposition   |
+| Pauli-Y  | y | 1.0       | 180°        | Rotates around Y-axis              |
+| Pauli-Z  | z | 0.0       | 0°          | Rotates around Z-axis (phase flip) |
+
+### 3.2 Simulation Logic
+Carried over from quantum_robot.py with the following behavior:
+- Run Qiskit circuit with 1024 shots
+- Apply depolarizing noise model at the user-specified noise rate
+- Return: probability of |1⟩, computed angle (prob × 180), ideal angle,
+  probability error, angle error, gate name, noise rate
+- All results logged to quantum_tests_data.csv (same format as existing file)
+
+### 3.3 Entanglement Simulation (New)
+For entangled robot pairs:
+- Run a 2-qubit Bell state circuit: H gate on qubit 0, then CNOT gate
+  (qubit 0 controls qubit 1)
+- Measure both qubits
+- Return both outcomes: the state of qubit 0 drives Robot A's behavior,
+  the state of qubit 1 drives Robot B's behavior
+- Because of the Bell state, outcomes are always correlated:
+  both |00⟩ or both |11⟩
+- Noise is applied to both qubits via the same depolarizing error model
+
+### 3.4 API Endpoints (FastAPI + WebSocket)
+
+```
+GET  /                         Serve the frontend HTML file
+WS   /ws                       Main WebSocket connection
+
+WebSocket message types (frontend → backend):
+  { type: "simulate",  gate: "h", noise_rate: 0.1, num_robots: 4 }
+  { type: "measure" }          Trigger wavefunction collapse
+  { type: "entangle",  noise_rate: 0.1 }
+  { type: "set_noise", noise_rate: 0.3 }
+
+WebSocket message types (backend → frontend):
+  { type: "superposition_state", robots: [ {id, angle, prob}, ... ],
+    gate: "h", noise_rate: 0.1, ideal_angle: 90 }
+  { type: "measurement_result", robots: [ {id, angle, prob, error}, ... ],
+    fidelity: 0.92 }
+  { type: "entanglement_state", pairs: [ {a: {id, angle}, b: {id, angle}}, ... ],
+    noise_rate: 0.1 }
+  { type: "error", message: "..." }
+```
+
+---
+
+## 4. Browser Frontend (HTML5 Canvas + Vanilla JavaScript)
+
+### 4.1 Layout
+
+```
++--------------------------------------------------+
+|  HEADER: Project title + mode indicator          |
++-------------------+------------------------------+
+|                   |                              |
+|   SIMULATION      |   CONTROL PANEL              |
+|   CANVAS          |   - Gate selector            |
+|   (robots move    |   - Robot count (4–20)       |
+|    here)          |   - Noise rate slider        |
+|                   |   - Mode buttons             |
+|                   |   - Keypress hints           |
++-------------------+------------------------------+
+|  EXPLANATION PANEL (changes dynamically)         |
+|  [ Beginner | Intermediate | Advanced ] toggle   |
++--------------------------------------------------+
+|  DATA PANEL: prob | angle | error | fidelity     |
++--------------------------------------------------+
+```
+
+### 4.2 Simulation Canvas
+- HTML5 Canvas, 2D rendering context
+- Dark background (space/quantum aesthetic)
+- Robots rendered as small circular agents with a directional indicator
+  showing their current angle (like a compass needle)
+- Robot color indicates state:
+  - Blue, wandering: superposition (pre-measurement)
+  - Gold, synchronized: entangled pair
+  - Green: measured, at ideal position
+  - Red/orange: measured, with visible decoherence error
+    (the further from ideal, the more orange/red)
+- Trail effect: faint path behind each robot showing recent movement
+
+### 4.3 Robot Behavior by Mode
+
+**Superposition Mode**
+- Robots move independently, each with its own randomized velocity,
+  heading, and wandering pattern
+- Movement is genuinely chaotic and individualistic — no coordination
+- Robots do not collide with each other (pass through)
+- This represents the undefined, probabilistic nature of superposition
+- On measurement trigger: all robots snap to an angle determined by
+  the Qiskit simulation result for the selected gate + noise rate
+- The snap is animated: robots smoothly rotate to their final angle
+  over ~0.5 seconds, then hold
+
+**Entanglement Mode**
+- Robots organized into pairs (2 robots per pair)
+- Within each pair, robots use a simplified Boids algorithm:
+  - Alignment: both robots in a pair always face the same direction
+  - Cohesion: robots in a pair are drawn toward each other
+  - Separation: robots maintain a minimum distance within the pair
+- Different pairs do NOT coordinate with each other
+- When one robot in a pair receives a measurement result,
+  its partner instantly mirrors the correlated outcome
+- Decoherence is visible as the alignment gradually breaking down
+  over time — the pair drifts apart in heading as noise increases
+
+**Decoherence Visualization (both modes)**
+- A visible "ghost" position shows where the robot would be at
+  ideal (zero noise) — rendered as a faint outline at the ideal angle
+- The gap between ghost and actual robot is the decoherence
+- As noise rate increases via the slider, the gap grows visibly
+
+### 4.4 User Interaction
+
+**Controls Panel**
+
+| Control | Type | Function |
+|---------|------|----------|
+| Gate selector | Dropdown | Choose quantum gate (h, x, id, sx, y, z) |
+| Robot count | Number input + slider | Set number of robots (4–20, default 4) |
+| Noise rate | Slider (0.0–1.0, default 0.1) | Set depolarizing noise rate |
+| Mode | Toggle buttons | Switch between Superposition / Entanglement |
+| Simulate | Button | Run quantum circuit, enter superposition/entangle mode |
+| Measure | Button | Collapse wavefunction, snap robots to result |
+| Reset | Button | Return all robots to neutral state |
+
+**Keyboard Shortcuts**
+| Key | Action |
+|-----|--------|
+| Space | Measure (collapse wavefunction) |
+| S | Simulate (run circuit) |
+| R | Reset |
+| E | Toggle Entanglement mode |
+| 1–6 | Select gate (1=h, 2=x, 3=id, 4=sx, 5=y, 6=z) |
+| ↑ / ↓ | Increase / decrease noise rate by 0.05 |
+| + / - | Add / remove a robot (within cap) |
+
+All keyboard shortcuts are displayed as small hints next to their
+corresponding buttons in the UI.
+
+**Robot count cap:** Maximum 20 robots. Above this, performance on
+a standard laptop degrades noticeably. A warning appears at 15+.
+
+---
+
+## 5. Explanation Panel
+
+The explanation panel sits below the canvas and updates dynamically
+based on the current mode, gate, and simulation state.
+
+### 5.1 Knowledge Level Toggle
+Three modes, user-selectable via a toggle at the top of the panel:
+
+**Beginner** (no prerequisites assumed)
+- Uses everyday analogies
+- Example for H gate in superposition:
+  "Think of a coin spinning in the air. While it's spinning, it's
+  neither heads nor tails — it's both at once. That's superposition.
+  The robots are doing the same thing right now. Press Space to
+  'catch' the coin and see which way it lands."
+- Example for entanglement:
+  "These robots are connected like twins who always wear matching
+  outfits, no matter how far apart they are. Watch what happens
+  when you change one."
+
+**Intermediate** (high school physics background)
+- Uses quantum vocabulary with brief definitions
+- Example for H gate:
+  "The Hadamard gate puts the qubit into an equal superposition of
+  |0⟩ and |1⟩ — P(|1⟩) = 0.5. Each robot's wandering represents
+  this undefined state. Measurement forces a definite outcome."
+- Mentions probability, gates, measurement
+
+**Advanced** (quantum computing background)
+- Full technical description
+- Example for H gate:
+  "H = (1/√2)[[1,1],[1,-1]]. Applied to |0⟩, produces
+  (|0⟩ + |1⟩)/√2. Depolarizing noise at rate ε maps ρ →
+  (1-ε)ρ + (ε/3)(XρX + YρY + ZρZ). The servo angle maps
+  P(|1⟩) × 180°, consistent with Nallakukkala (2026)."
+
+### 5.2 Dynamic Status Label
+A single line above the explanation that changes based on simulation state:
+
+| State | Label |
+|-------|-------|
+| Idle | "Select a gate and press S or Simulate to begin." |
+| Superposition active | "Robots are in superposition — state undefined." |
+| Measuring | "Collapsing wavefunction..." |
+| Measured, low noise | "Measurement complete. Fidelity: [value]" |
+| Measured, high noise | "High decoherence detected. Results unreliable." |
+| Entangled | "Robots entangled. Observe correlated behavior." |
+| Decoherence breaking entanglement | "Decoherence is breaking entanglement." |
+
+---
+
+## 6. Data Panel
+
+A compact bar below the explanation panel showing live values:
+
+```
+Gate: H  |  P(|1⟩): 0.487  |  Angle: 87°  |  Ideal: 90°  |
+Error: 3°  |  Fidelity: 0.97  |  Noise Rate: 0.10
+```
+
+Values update after each measurement. Fidelity is displayed as both
+a number and a small color-coded bar (green = high, red = low).
+All values are logged to CSV in the same format as quantum_tests_data.csv.
+
+---
+
+## 7. Data Logging
+
+Every measurement event is logged to quantum_swarm_data.csv with columns:
+
+```
+Timestamp, Gate Name, Noise Rate, Num Robots, Mode,
+Probability, Angle, Ideal Angle, Probability Error,
+Angle Error, Fidelity, Knowledge Level Selected
+```
+
+This extends the existing data format from quantum_robot.py and
+quantum_tests_data.csv, making the simulation data directly comparable
+to the physical prototype data collected in Stage 1 of the project.
+
+---
+
+## 8. File Structure
+
+```
+quantum_swarm_sim/
+├── backend/
+│   ├── main.py              # FastAPI app, WebSocket handler
+│   ├── quantum_engine.py    # Qiskit simulation logic (adapted from quantum_robot.py)
+│   └── requirements.txt     # fastapi, uvicorn, qiskit, qiskit-aer, websockets
+├── frontend/
+│   ├── index.html           # Single HTML file, all CSS and JS inline
+│   └── (no external deps)
+├── data/
+│   └── quantum_swarm_data.csv   # Auto-created on first measurement
+└── spec/
+    └── quantum_swarm_simulation_spec.md   # This document
+```
+
+---
+
+## 9. Technology Stack
+
+| Layer | Technology | Reason |
+|-------|-----------|--------|
+| Quantum simulation | Qiskit + Qiskit Aer | Already in use in project |
+| Backend server | FastAPI + Uvicorn | Lightweight, WebSocket-native, Python |
+| Frontend rendering | HTML5 Canvas + Vanilla JS | No framework overhead, co-principal's architecture philosophy |
+| Communication | WebSocket | Real-time, bidirectional, needed for live robot updates |
+| Data storage | CSV | Consistent with existing project data format |
+| Physics | Custom (no library) | Boids implemented from scratch for full control |
+
+---
+
+## 10. What This Specification Does NOT Include
+
+The following are explicitly out of scope for Stage 1 (simulation):
+
+- A noise-correcting AI model (removed by researcher decision)
+- Physical robot control (Arduino/serial — this is Stage 2)
+- Multi-user co-op mode (may be added later, not required for proof-of-concept)
+- Authentication or user accounts
+- Mobile-specific layout (desktop browser only for now)
+- 3D rendering
+
+---
+
+## 11. Relationship to Existing Code
+
+| Existing File | Role in Simulation |
+|--------------|-------------------|
+| quantum_robot.py | quantum_engine.py is a direct adaptation — serial removed, WebSocket added |
+| superposition_test_bridge.py | RY rotation logic informs superposition mode |
+| qiskit_test_bridge.py | Single-shot measurement logic informs Measure trigger |
+| data_analysis.py | Data panel visualizations inspired by existing graphs |
+| quantum_tests_data.csv | New CSV extends same column format |
+| sketch_apr20a.ino | Not used in simulation; relevant in Stage 2 |
+
+---
+
+## 12. Claude Code Prompt Sequence
+
+Run these prompts in order, one at a time. Wait for Claude Code to finish
+each step before sending the next. Do not combine them into one message —
+Claude Code does better work when each task is clearly bounded.
+
+---
+
+### PROMPT 1 — GitHub Repository Setup
+
+Paste this first, before any files exist:
+
+> "I need to set up a GitHub repository for my Applied Physics research
+> project. My VS Code and GitHub are already connected.
+>
+> Please do the following:
+> 1. Initialize a new Git repository in the current folder
+> 2. Create a .gitignore file appropriate for a Python + JavaScript project
+>    (ignore __pycache__, .env, node_modules, *.pyc, .DS_Store, and
+>    any .csv files in the data/ folder since those are generated at runtime)
+> 3. Create a README.md with the following content:
+>    - Project title: Bridging the Quantum Gap: A Robotic Modeling System
+>      for Visualizing Decoherence and Qubit Behaviors
+>    - Author: Sruti Nallakukkala, PRISMS Applied Physics Research Lab
+>    - One paragraph describing the project (quantum swarm simulation,
+>      Stage 1 of a two-stage research project, pedagogical tool for
+>      quantum computing education)
+>    - A section called 'How to Run' (leave it as TODO for now)
+>    - A section called 'Project Structure' (leave it as TODO for now)
+> 4. Make an initial commit with message: 'Initial commit — project setup'
+>
+> Do not push to GitHub yet. I will do that manually once the structure
+> looks right."
+
+---
+
+### PROMPT 2 — Folder Structure and Existing File Organization
+
+Paste this after Prompt 1 is complete:
+
+> "Now create the full folder structure for this project and organize
+> the existing files I already have.
+>
+> Create these folders:
+> - backend/
+> - frontend/
+> - data/
+> - spec/
+> - legacy/
+>
+> Then move or copy the following existing files into the correct locations:
+> - quantum_robot.py → backend/quantum_robot_v1.py (rename to v1 so we
+>   preserve the original while building the new version beside it)
+> - data_analysis.py → legacy/data_analysis.py
+> - h_gate.py → legacy/h_gate.py
+> - python_test_bridge.py → legacy/python_test_bridge.py
+> - qiskit_test_bridge.py → legacy/qiskit_test_bridge.py
+> - superposition_test_bridge.py → legacy/superposition_test_bridge.py
+> - sketch_apr20a.ino → legacy/sketch_apr20a.ino
+> - servo_test.ino → legacy/servo_test.ino
+> - quantum_tests_data.csv → data/quantum_tests_data_stage1.csv
+> - quantum_swarm_simulation_spec.md → spec/quantum_swarm_simulation_spec.md
+>
+> Create an empty placeholder file called .gitkeep inside the data/ folder
+> so Git tracks the folder even when no CSV exists yet.
+>
+> Then commit everything with message: 'feat: organize project structure
+> and archive Stage 1 prototype files'"
+
+---
+
+### PROMPT 3 — Python Backend
+
+Paste this after Prompt 2 is complete:
+
+> "Now build the Python backend. Read the full specification at
+> spec/quantum_swarm_simulation_spec.md before writing any code.
+> Also read backend/quantum_robot_v1.py — the new quantum_engine.py
+> should be a direct adaptation of that file.
+>
+> Create the following files in backend/:
+>
+> 1. requirements.txt — containing exactly:
+>    fastapi
+>    uvicorn[standard]
+>    qiskit
+>    qiskit-aer
+>    websockets
+>
+> 2. quantum_engine.py — adapted from quantum_robot_v1.py with:
+>    - Serial/Arduino code completely removed
+>    - All gate logic and IDEAL_VALUES preserved exactly
+>    - simulate() method preserved exactly, including noise model
+>    - New method simulate_bell_state(noise_rate) for entanglement mode
+>      (H gate on qubit 0, CNOT targeting qubit 1, measure both,
+>      return correlated outcomes for robot pair)
+>    - calculate_error() and log_to_csv() preserved
+>    - log_to_csv() updated to also accept num_robots, mode, and
+>      knowledge_level columns, writing to data/quantum_swarm_data.csv
+>    - No changes to any quantum logic
+>
+> 3. main.py — FastAPI app with:
+>    - GET / that serves frontend/index.html
+>    - WebSocket endpoint at /ws
+>    - Handles all four message types from the spec:
+>      simulate, measure, entangle, set_noise
+>    - Returns all four response types from the spec:
+>      superposition_state, measurement_result, entanglement_state, error
+>    - Imports QuantumEngine from quantum_engine.py
+>
+> Do not use any libraries not in requirements.txt.
+> Commit when done with message: 'feat: implement Python backend
+> with FastAPI and Qiskit quantum engine'"
+
+---
+
+### PROMPT 4 — Browser Frontend
+
+Paste this after Prompt 3 is complete:
+
+> "Now build the browser frontend. Read the full specification at
+> spec/quantum_swarm_simulation_spec.md, specifically sections 4 and 5,
+> before writing any code.
+>
+> Create frontend/index.html as a single self-contained file with all
+> CSS and JavaScript inline. No external dependencies, no frameworks,
+> no CDN links.
+>
+> The file must implement exactly:
+>
+> Layout (Section 4.1 of spec):
+> - Header with project title and current mode indicator
+> - Left: simulation canvas (dark background, quantum aesthetic)
+> - Right: controls panel with all controls from Section 4.4
+> - Below: explanation panel with Beginner/Intermediate/Advanced toggle
+> - Below: data panel showing live values
+>
+> Canvas rendering (Section 4.2):
+> - Robots as circular agents with directional needle
+> - Color coding: blue=superposition, gold=entangled, green=measured
+>   ideal, red/orange=measured with decoherence error
+> - Ghost outline showing ideal position
+> - Trail effect behind each robot
+>
+> Robot behavior (Section 4.3):
+> - Superposition mode: independent chaotic wandering, snap on measure
+> - Entanglement mode: Boids algorithm within pairs, correlated outcomes
+> - Decoherence: gap between ghost and actual robot grows with noise
+>
+> All controls and keyboard shortcuts from Section 4.4.
+> All explanation text for all three knowledge levels from Section 5.1.
+> All dynamic status labels from Section 5.2.
+> All data panel fields from Section 6.
+>
+> WebSocket connection to ws://localhost:8000/ws.
+>
+> Do not use any JavaScript frameworks.
+> Commit when done with message: 'feat: implement browser frontend
+> with canvas simulation and explanation panel'"
+
+---
+
+### PROMPT 5 — Final Checks and README Update
+
+Paste this after Prompt 4 is complete:
+
+> "Do a final review of the complete project. Check that:
+> 1. backend/main.py correctly serves frontend/index.html at GET /
+> 2. The WebSocket message types in main.py exactly match the spec
+> 3. The frontend WebSocket address matches what the backend serves
+> 4. quantum_engine.py has no remaining serial/Arduino imports or code
+> 5. requirements.txt has all necessary packages
+>
+> Then update README.md:
+> - Fill in the 'How to Run' section with exact terminal commands:
+>   cd backend
+>   pip install -r requirements.txt
+>   uvicorn main:app --reload
+>   Then open http://localhost:8000 in a browser
+> - Fill in the 'Project Structure' section with the actual folder
+>   structure as it now exists
+>
+> Then make a final commit with message: 'docs: complete README and
+> final project review'
+>
+> Then tell me if there is anything I need to do manually before
+> pushing to GitHub."
