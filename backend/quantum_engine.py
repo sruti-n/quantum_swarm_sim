@@ -135,9 +135,29 @@ class QuantumEngine:
         the ideal value exactly. Derived from probability error, not a new circuit."""
         return max(0.0, 1.0 - prob_error)
 
+    # Shots is appended last so the earlier columns keep their Stage 1 positions.
+    CSV_HEADER = [
+        'Timestamp', 'Gate Name', 'Noise Rate', 'Num Robots', 'Mode',
+        'Probability', 'Angle', 'Ideal Angle', 'Probability Error',
+        'Angle Error', 'Fidelity', 'Knowledge Level Selected', 'Shots'
+    ]
+
+    def _archive_csv_if_old_format(self):
+        """A CSV written before a column was added has a different header. Appending
+        to it would misalign rows, so move it aside and start a fresh file."""
+        if not os.path.exists(self.csv_file) or os.stat(self.csv_file).st_size == 0:
+            return
+        with open(self.csv_file, newline='') as file:
+            header = next(csv.reader(file), [])
+        if header != self.CSV_HEADER:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            root, ext = os.path.splitext(self.csv_file)
+            os.rename(self.csv_file, f"{root}_old_format_{stamp}{ext}")
+
     def log_to_csv(self, prob, gate_name, angle, prob_error, angle_error, noise_rate,
-                   num_robots, mode, fidelity, knowledge_level):
+                   num_robots, mode, fidelity, knowledge_level, shots):
         os.makedirs(os.path.dirname(self.csv_file), exist_ok=True)
+        self._archive_csv_if_old_format()
         write_header = not os.path.exists(self.csv_file) or os.stat(self.csv_file).st_size == 0
 
         ideal_angle = self.IDEAL_VALUES[gate_name]['angle']
@@ -145,17 +165,13 @@ class QuantumEngine:
         with open(self.csv_file, mode='a', newline='') as file:
             writer = csv.writer(file)
             if write_header:
-                writer.writerow([
-                    'Timestamp', 'Gate Name', 'Noise Rate', 'Num Robots', 'Mode',
-                    'Probability', 'Angle', 'Ideal Angle', 'Probability Error',
-                    'Angle Error', 'Fidelity', 'Knowledge Level Selected'
-                ])
+                writer.writerow(self.CSV_HEADER)
 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             writer.writerow([
                 timestamp, gate_name, noise_rate, num_robots, mode,
                 prob, angle, ideal_angle, prob_error,
-                angle_error, fidelity, knowledge_level
+                angle_error, fidelity, knowledge_level, shots
             ])
 
         # Printing the logged data to the console for verification purposes

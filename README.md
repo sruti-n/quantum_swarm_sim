@@ -44,6 +44,7 @@ on a different port, the WebSocket follows automatically.
 | Toggle Entanglement mode | `E` |
 | Noise rate ± 0.05 | `↑` / `↓` |
 | Add / remove a robot (4–20) | `+` / `-` |
+| Halve / double shots (1–4096, default 256) | `[` / `]` |
 
 ## Project Structure
 
@@ -88,5 +89,11 @@ directly comparable:
 
 ```
 Timestamp, Gate Name, Noise Rate, Num Robots, Mode, Probability, Angle,
-Ideal Angle, Probability Error, Angle Error, Fidelity, Knowledge Level Selected
+Ideal Angle, Probability Error, Angle Error, Fidelity, Knowledge Level Selected,
+Shots
 ```
+
+`Shots` was added when the Shots slider was introduced. If an existing
+`quantum_swarm_data.csv` has the older header, the backend renames it to
+`quantum_swarm_data_old_format_<timestamp>.csv` and starts a new file rather
+than appending misaligned rows.

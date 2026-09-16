@@ -20,9 +20,10 @@ engine = QuantumEngine()
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_FILE = os.path.join(PROJECT_ROOT, "frontend", "index.html")
 
-# Every circuit is run with the engine's default shot count (256), reduced from the
-# Stage 1 prototype's 1024 for faster feedback in the browser.
-TOTAL_SHOTS = QuantumEngine.DEFAULT_SHOTS
+# Circuits run with the engine's default shot count (256) unless the user picks
+# another value with the Shots slider; the prototype used 1024.
+MIN_SHOTS = 1
+MAX_SHOTS = 4096
 
 MIN_ROBOTS = 4
 MAX_ROBOTS = 20
@@ -56,6 +57,14 @@ def clamp_noise(value):
     return max(0.0, min(1.0, rate))
 
 
+def clamp_shots(value):
+    try:
+        shots = int(value)
+    except (TypeError, ValueError):
+        return QuantumEngine.DEFAULT_SHOTS
+    return max(MIN_SHOTS, min(MAX_SHOTS, shots))
+
+
 def validate_gate(value):
     return value if value in VALID_GATES else 'h'
 
@@ -67,6 +76,7 @@ class SessionState:
         self.gate = 'h'
         self.noise_rate = 0.1
         self.num_robots = MIN_ROBOTS
+        self.shots = QuantumEngine.DEFAULT_SHOTS
         self.mode = 'superposition'
         self.knowledge_level = 'beginner'
 
@@ -109,12 +119,13 @@ async def handle_simulate(websocket, state, message):
     state.gate = validate_gate(message.get("gate", state.gate))
     state.noise_rate = clamp_noise(message.get("noise_rate", state.noise_rate))
     state.num_robots = clamp_robots(message.get("num_robots", state.num_robots))
+    state.shots = clamp_shots(message.get("shots", state.shots))
     state.mode = 'superposition'
 
     # Each robot is its own qubit, so each gets its own circuit run.
     robots = []
     for robot_id in range(state.num_robots):
-        prob = engine.simulate(state.gate, TOTAL_SHOTS, state.noise_rate)
+        prob = engine.simulate(state.gate, state.shots, state.noise_rate)
         robots.append({
             "id": robot_id,
             "angle": int(prob * 180),
@@ -127,6 +138,7 @@ async def handle_simulate(websocket, state, message):
         "gate": state.gate,
         "noise_rate": state.noise_rate,
         "ideal_angle": engine.IDEAL_VALUES[state.gate]["angle"],
+        "shots": state.shots,
     })
 
 
@@ -140,12 +152,14 @@ async def handle_measure(websocket, state, message):
         state.noise_rate = clamp_noise(message["noise_rate"])
     if "num_robots" in message:
         state.num_robots = clamp_robots(message["num_robots"])
+    if "shots" in message:
+        state.shots = clamp_shots(message["shots"])
 
     robots = []
     fidelities = []
 
     for robot_id in range(state.num_robots):
-        prob = engine.simulate(state.gate, TOTAL_SHOTS, state.noise_rate)
+        prob = engine.simulate(state.gate, state.shots, state.noise_rate)
         angle = int(prob * 180)
         prob_error, angle_error = engine.calculate_error(state.gate, prob, angle)
         fidelity = engine.calculate_fidelity(prob_error)
@@ -169,6 +183,7 @@ async def handle_measure(websocket, state, message):
             mode=state.mode,
             fidelity=fidelity,
             knowledge_level=state.knowledge_level,
+            shots=state.shots,
         )
 
     swarm_fidelity = sum(fidelities) / len(fidelities) if fidelities else 0.0
@@ -178,6 +193,7 @@ async def handle_measure(websocket, state, message):
         "robots": robots,
         "fidelity": swarm_fidelity,
         "gate": state.gate,
+        "shots": state.shots,
     })
 
 

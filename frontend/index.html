@@ -146,7 +146,7 @@
     font-family: inherit;
   }
 
-  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:hover:not(:disabled):not(.active) { border-color: var(--accent); color: var(--accent); }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   button.active { background: var(--accent); border-color: var(--accent); color: #04121f; }
   button.primary { background: #16233c; border-color: #2c4a7a; }
@@ -358,7 +358,7 @@
       <label for="shots">Shots <span class="hint">[ / ]</span></label>
       <input type="range" id="shots" min="0" max="12" step="1" value="8">
       <div style="text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums" id="shotsVal">256</div>
-      <div class="warn" id="shotsNote">Entanglement mode runs one shot per pair, so this setting does not apply.</div>
+      <div class="warn" id="shotsNote">Entangling runs one shot per pair, so here this setting only affects Measure.</div>
     </div>
 
     <div class="field">
@@ -438,6 +438,7 @@
     phase: 'idle',               // 'idle' | 'super' | 'entangled' | 'measured'
     gate: 'h',
     noise: 0.1,
+    shots: 256,
     count: 4,
     level: 'beginner',
     simGate: 'h',                // gate the robots were actually simulated with
@@ -452,10 +453,11 @@
   var canvas = $('sim'), ctx = canvas.getContext('2d');
   var gateSel = $('gate'), countInput = $('robotCount'), countRange = $('robotRange');
   var noiseInput = $('noise'), noiseVal = $('noiseVal'), robotWarn = $('robotWarn');
+  var shotsInput = $('shots'), shotsVal = $('shotsVal'), shotsNote = $('shotsNote');
   var btnSimulate = $('btnSimulate'), btnMeasure = $('btnMeasure'), btnReset = $('btnReset');
   var modeSuper = $('modeSuper'), modeEnt = $('modeEnt');
   var modeIndicator = $('modeIndicator'), statusLabel = $('statusLabel');
-  var explanationText = $('explanationText');
+  var explanationText = $('explanationText'), shotsText = $('shotsText');
   var connDot = $('connDot'), connText = $('connText');
   var loadingOverlay = $('loadingOverlay'), loadingTitle = $('loadingTitle'), loadingDetail = $('loadingDetail');
 
@@ -671,7 +673,8 @@
       sx: "This is half of a flip. Instead of going all the way from off to on, the robot stops halfway — caught in between, still undecided.",
       y: "The Y gate flips the robot too, but it also twists it along the way. The end result looks like the X gate, but the path there is different.",
       z: "The Z gate is a hidden change. If you only look at where the robot points, nothing happened — the change is invisible until you combine it with other gates.",
-      entangled: "These robots are connected like twins who always wear matching outfits, no matter how far apart they are. Watch what happens when you change one."
+      entangled: "These robots are connected like twins who always wear matching outfits, no matter how far apart they are. Watch what happens when you change one.",
+      shots: "A shot is one run of the experiment. Each run only ever gives a yes or a no — like one toss of a coin, which lands heads or tails, never half-and-half. To find out how likely heads really is, you toss it many times and count. More shots means a more trustworthy answer. Try 1 shot with the H gate and watch the robots jump all the way to 0° or 180°."
     },
     intermediate: {
       h: "The Hadamard gate puts the qubit into an equal superposition of |0⟩ and |1⟩ — P(|1⟩) = 0.5. Each robot's wandering represents this undefined state. Measurement forces a definite outcome.",
@@ -680,7 +683,8 @@
       sx: "The √X gate is the square root of a bit flip — applying it twice equals one X gate. A single application gives P(|1⟩) = 0.5, an equal superposition.",
       y: "The Pauli-Y gate rotates the qubit around the Y-axis of the Bloch sphere, taking |0⟩ to i|1⟩. The measured probability is P(|1⟩) = 1.0, matching X in outcome but differing in phase.",
       z: "The Pauli-Z gate is a phase flip: it leaves |0⟩ alone and sends |1⟩ to −|1⟩. Because measurement discards phase, P(|1⟩) = 0.0 and the robots stay at 0°.",
-      entangled: "The pair is prepared in a Bell state via H on qubit 0 followed by CNOT. Measuring one qubit determines the other, so outcomes are correlated: |00⟩ or |11⟩."
+      entangled: "The pair is prepared in a Bell state via H on qubit 0 followed by CNOT. Measuring one qubit determines the other, so outcomes are correlated: |00⟩ or |11⟩.",
+      shots: "A single measurement returns only 0 or 1, so P(|1⟩) has to be estimated by running the circuit many times (shots) and counting the 1s. For the H gate that estimate scatters by about ±0.5/√N: roughly ±0.03 at 256 shots and ±0.016 at 1024. This sampling scatter is separate from noise — more shots shrink it, but they cannot remove the error that noise causes."
     },
     advanced: {
       h: "H = (1/√2)[[1,1],[1,-1]]. Applied to |0⟩, produces (|0⟩ + |1⟩)/√2. Depolarizing noise at rate ε maps ρ → (1-ε)ρ + (ε/3)(XρX + YρY + ZρZ). The servo angle maps P(|1⟩) × 180°, consistent with Nallakukkala (2026).",
@@ -689,7 +693,8 @@
       sx: "√X = (1/2)[[1+i,1−i],[1−i,1+i]], satisfying (√X)² = X. Acting on |0⟩ gives (|0⟩ + i|1⟩)·(1/√2) up to global phase, so P(|1⟩) = 0.5.",
       y: "Y = [[0,−i],[i,0]]. Y|0⟩ = i|1⟩, so P(|1⟩) = 1 — identical measurement statistics to X in the computational basis, differing only by phase, which measurement discards.",
       z: "Z = [[1,0],[0,−1]]. Z|0⟩ = |0⟩, so P(|1⟩) = 0. Z acts nontrivially only on superpositions, where it introduces a relative phase invisible to a computational-basis measurement.",
-      entangled: "The pair is prepared as |Φ⁺⟩ = (|00⟩ + |11⟩)/√2 via H⊗I followed by CNOT. Depolarizing noise at rate ε on both the single-qubit and two-qubit channels degrades the correlation; observed agreement falls from 1.0 toward chance as ε increases."
+      entangled: "The pair is prepared as |Φ⁺⟩ = (|00⟩ + |11⟩)/√2 via H⊗I followed by CNOT. Depolarizing noise at rate ε on both the single-qubit and two-qubit channels degrades the correlation; observed agreement falls from 1.0 toward chance as ε increases.",
+      shots: "The reported probability is the estimator p̂ = k/N, where k ~ Binomial(N, p) over N shots. It is unbiased with standard error √(p(1−p)/N), largest at p = 0.5 (0.5/√N) and zero at p = 0 or 1, so X, Y, ID and Z are exact at ε = 0 while H and SX are not. Because fidelity is computed as 1 − |p̂ − p_ideal|, finite sampling lowers it even without noise (mean |p̂ − p| ≈ 0.4/√N at p = 0.5 for large N). The angle int(p̂ × 180) also has a resolution of 180/N degrees, so at N = 1 only 0° or 180° is possible."
     }
   };
 
@@ -703,6 +708,7 @@
 
   function refreshExplanation() {
     explanationText.textContent = currentExplanation();
+    shotsText.textContent = COPY[state.level].shots;
   }
 
   function updateModeIndicator() {
@@ -723,6 +729,7 @@
     if ('ideal' in o) $('dIdeal').textContent = o.ideal === null ? '—' : o.ideal + '°';
     if ('error' in o) $('dError').textContent = o.error === null ? '—' : o.error + '°';
     if ('noise' in o) $('dNoise').textContent = o.noise.toFixed(2);
+    if ('shots' in o) $('dShots').textContent = o.shots === null ? '—' : o.shots;
     if ('fidelity' in o) {
       var f = o.fidelity;
       $('dFid').textContent = f === null ? '—' : f.toFixed(3);
@@ -811,7 +818,8 @@
       });
       setStatus('Robots are in superposition — state undefined.');
       setData({ gate: msg.gate, prob: null, angle: null, ideal: msg.ideal_angle,
-                error: null, noise: msg.noise_rate, fidelity: null });
+                error: null, noise: msg.noise_rate, fidelity: null,
+                shots: msg.shots || state.shots });
       refreshExplanation();
       updateModeIndicator();
       setControlsEnabled(true);
@@ -847,6 +855,7 @@
         ideal: ideal,
         error: n ? Math.round(sumE / n) : null,
         noise: state.noise,
+        shots: msg.shots || state.shots,
         fidelity: msg.fidelity
       });
       updateModeIndicator();
@@ -893,8 +902,9 @@
       showLoading('simulate', 'Running quantum circuit...', 'Simulating Bell pairs (H + CNOT) with ' + noiseText);
       send({ type: 'entangle', noise_rate: state.noise, num_robots: state.count });
     } else {
-      showLoading('simulate', 'Running quantum circuit...', 'Simulating ' + state.gate.toUpperCase() + ' gate with ' + noiseText);
-      send({ type: 'simulate', gate: state.gate, noise_rate: state.noise, num_robots: state.count });
+      showLoading('simulate', 'Running quantum circuit...',
+        'Simulating ' + state.gate.toUpperCase() + ' gate with ' + noiseText + ' · ' + shotsLabel());
+      send({ type: 'simulate', gate: state.gate, noise_rate: state.noise, num_robots: state.count, shots: state.shots });
     }
     setStatus('Quantum circuit running...');
   }
@@ -910,11 +920,11 @@
     }
     if (state.loading) return;   // ignore repeat triggers while a circuit runs
     showLoading('measure', 'Collapsing wavefunction...',
-      'Measuring ' + state.simGate.toUpperCase() + ' gate with noise rate ' + state.noise.toFixed(2));
+      'Measuring ' + state.simGate.toUpperCase() + ' gate with noise rate ' + state.noise.toFixed(2) + ' · ' + shotsLabel());
     setStatus('Collapsing wavefunction...');
     // Send the simulated context so the backend measures the same circuit the
     // robots are showing, even if its session state was lost on a reconnect.
-    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length });
+    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length, shots: state.shots });
   }
 
   function doReset() {
@@ -931,6 +941,7 @@
 
   function setMode(mode) {
     state.mode = mode;
+    shotsNote.style.display = mode === 'entanglement' ? 'block' : 'none';
     modeSuper.classList.toggle('active', mode === 'superposition');
     modeEnt.classList.toggle('active', mode === 'entanglement');
     doReset();
@@ -955,6 +966,19 @@
     send({ type: 'set_noise', noise_rate: state.noise });
   }
 
+  function shotsLabel() {
+    return state.shots + (state.shots === 1 ? ' shot' : ' shots');
+  }
+
+  // Takes the slider exponent; shots = 2^exp. Applies on the next Simulate or Measure.
+  function setShotsExp(exp) {
+    exp = Math.max(MIN_SHOTS_EXP, Math.min(MAX_SHOTS_EXP, exp | 0));
+    state.shots = Math.pow(2, exp);
+    shotsInput.value = exp;
+    shotsVal.textContent = state.shots;
+    setData({ shots: state.shots });
+  }
+
   // ---------- events ----------
   gateSel.addEventListener('change', function () {
     state.gate = gateSel.value;
@@ -965,6 +989,7 @@
   countInput.addEventListener('change', function () { setCount(parseInt(countInput.value, 10)); });
   countRange.addEventListener('input', function () { setCount(parseInt(countRange.value, 10)); });
   noiseInput.addEventListener('input', function () { setNoise(parseFloat(noiseInput.value)); });
+  shotsInput.addEventListener('input', function () { setShotsExp(parseInt(shotsInput.value, 10)); });
 
   btnSimulate.addEventListener('click', doSimulate);
   btnMeasure.addEventListener('click', doMeasure);
@@ -1017,6 +1042,8 @@
     else if (e.key === 'ArrowDown') { e.preventDefault(); setNoise(state.noise - 0.05); }
     else if (e.key === '+' || e.key === '=') { setCount(state.count + 1); }
     else if (e.key === '-' || e.key === '_') { setCount(state.count - 1); }
+    else if (e.key === '[') { setShotsExp(parseInt(shotsInput.value, 10) - 1); }
+    else if (e.key === ']') { setShotsExp(parseInt(shotsInput.value, 10) + 1); }
   });
 
   // Some browsers (Firefox) activate a focused button on Space keyup even when
@@ -1029,6 +1056,7 @@
   resize();
   setCount(4);
   setNoise(0.1);
+  setShotsExp(DEFAULT_SHOTS_EXP);
   refreshExplanation();
   updateModeIndicator();
   setData({ gate: 'h', ideal: IDEAL.h.angle });
