@@ -1,6 +1,6 @@
 # Bridging the Quantum Gap: A Robotic Modeling System for Visualizing Decoherence and Qubit Behaviors
 
-**Author:** Sruti Nallakukkala, PRISMS Applied Physics Research Lab
+**Author:** Sruti Nallakukkala, Princeton International School of Mathematics and Science: Applied Physics Research Lab
 
 ## Overview
 
