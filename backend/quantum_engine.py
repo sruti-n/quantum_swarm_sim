@@ -155,12 +155,14 @@ class QuantumEngine:
             os.rename(self.csv_file, f"{root}_old_format_{stamp}{ext}")
 
     def log_to_csv(self, prob, gate_name, angle, prob_error, angle_error, noise_rate,
-                   num_robots, mode, fidelity, knowledge_level, shots):
+                   num_robots, mode, fidelity, knowledge_level, shots, ideal_angle=None):
         os.makedirs(os.path.dirname(self.csv_file), exist_ok=True)
         self._archive_csv_if_old_format()
         write_header = not os.path.exists(self.csv_file) or os.stat(self.csv_file).st_size == 0
 
-        ideal_angle = self.IDEAL_VALUES[gate_name]['angle']
+        # Bell pair rows pass the partner's angle as the ideal; gate rows use the gate's ideal.
+        if ideal_angle is None:
+            ideal_angle = self.IDEAL_VALUES[gate_name]['angle']
 
         with open(self.csv_file, mode='a', newline='') as file:
             writer = csv.writer(file)

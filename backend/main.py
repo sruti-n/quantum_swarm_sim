@@ -154,6 +154,12 @@ async def handle_measure(websocket, state, message):
         state.num_robots = clamp_robots(message["num_robots"])
     if "shots" in message:
         state.shots = clamp_shots(message["shots"])
+    if message.get("mode") in ("superposition", "entanglement"):
+        state.mode = message["mode"]
+
+    if state.mode == 'entanglement':
+        await handle_measure_bell_pairs(websocket, state)
+        return
 
     robots = []
     fidelities = []
@@ -194,6 +200,66 @@ async def handle_measure(websocket, state, message):
         "fidelity": swarm_fidelity,
         "gate": state.gate,
         "shots": state.shots,
+        "mode": "superposition",
+    })
+
+
+async def handle_measure_bell_pairs(websocket, state):
+    """Measure each entangled pair with the Bell state circuit (one shot per pair).
+
+    Both robots in a pair collapse together: in the noiseless case they land on
+    the same angle. Each robot's ideal is its partner's outcome, so a robot's
+    error is 0 when the pair stayed correlated and 180 when decoherence broke it.
+    Fidelity is the fraction of pairs that stayed correlated. With an odd robot
+    count the last robot has no partner and is not measured.
+    """
+    robots = []
+    correlated_pairs = 0
+    num_pairs = state.num_robots // 2
+
+    for pair_index in range(num_pairs):
+        outcome = engine.simulate_bell_state(state.noise_rate)
+        if outcome["correlated"]:
+            correlated_pairs += 1
+        pair_fidelity = 1.0 if outcome["correlated"] else 0.0
+
+        members = (
+            (pair_index * 2, outcome["qubit_0"], outcome["angle_0"], outcome["angle_1"], outcome["qubit_1"]),
+            (pair_index * 2 + 1, outcome["qubit_1"], outcome["angle_1"], outcome["angle_0"], outcome["qubit_0"]),
+        )
+        for robot_id, bit, angle, partner_angle, partner_bit in members:
+            angle_error = abs(angle - partner_angle)
+            robots.append({
+                "id": robot_id,
+                "angle": angle,
+                "prob": float(bit),
+                "error": angle_error,
+                "ideal_angle": partner_angle,
+            })
+            engine.log_to_csv(
+                prob=float(bit),
+                gate_name='bell',
+                angle=angle,
+                prob_error=float(abs(bit - partner_bit)),
+                angle_error=angle_error,
+                noise_rate=state.noise_rate,
+                num_robots=state.num_robots,
+                mode=state.mode,
+                fidelity=pair_fidelity,
+                knowledge_level=state.knowledge_level,
+                shots=1,
+                ideal_angle=partner_angle,
+            )
+
+    await websocket.send_json({
+        "type": "measurement_result",
+        "robots": robots,
+        "fidelity": correlated_pairs / num_pairs if num_pairs else 0.0,
+        "gate": "bell",
+        "shots": 1,
+        "mode": "entanglement",
+        "pairs_total": num_pairs,
+        "pairs_correlated": correlated_pairs,
     })
 
 

@@ -85,7 +85,14 @@ For entangled robot pairs:
 - Because of the Bell state, outcomes are always correlated:
   both |00⟩ or both |11⟩
 - Noise is applied to both qubits via the same depolarizing error model
-- Each pair runs a single shot, so the Shots setting does not affect entangling
+- Each pair runs a single shot, so the Shots setting does not affect Entanglement mode
+- **Measuring entangled pairs:** when Measure is triggered in Entanglement mode,
+  each pair runs a fresh Bell state circuit (one shot) and both robots collapse
+  together to that outcome (0° or 180°). Each robot's ideal is its partner's
+  outcome, so its error is 0° if the pair stayed correlated and 180° if
+  decoherence broke the correlation. Fidelity is the fraction of pairs that
+  stayed correlated. Measured with the simulator over 80 pairs: 80/80
+  correlated at noise 0.0 and 50/80 at noise 0.6
 - Robots are paired in order (0–1, 2–3, …). With an odd robot count the last
   robot is left unpaired and is not simulated. Entanglement mode therefore
   requires at least 2 robots (Section 4.4)
@@ -99,8 +106,8 @@ WS   /ws                       Main WebSocket connection
 WebSocket message types (frontend → backend):
   { type: "simulate",  gate: "h", noise_rate: 0.1, num_robots: 4, shots: 256 }
   { type: "measure" }          Trigger wavefunction collapse
-  { type: "measure",   gate: "h", noise_rate: 0.1, num_robots: 4, shots: 256 }
-                               Same, with optional context (see note)
+  { type: "measure",   gate: "h", noise_rate: 0.1, num_robots: 4, shots: 256,
+    mode: "superposition" }    Same, with optional context (see note)
   { type: "entangle",  noise_rate: 0.1, num_robots: 4 }
   { type: "set_noise", noise_rate: 0.3 }
 
@@ -111,7 +118,11 @@ WebSocket message types (backend → frontend):
   { type: "superposition_state", robots: [ {id, angle, prob}, ... ],
     gate: "h", noise_rate: 0.1, ideal_angle: 90, shots: 256 }
   { type: "measurement_result", robots: [ {id, angle, prob, error}, ... ],
-    fidelity: 0.92, gate: "h", shots: 256 }
+    fidelity: 0.92, gate: "h", shots: 256, mode: "superposition" }
+  { type: "measurement_result",            (Entanglement mode)
+    robots: [ {id, angle, prob, error, ideal_angle}, ... ],
+    fidelity: 0.75, gate: "bell", shots: 1, mode: "entanglement",
+    pairs_total: 4, pairs_correlated: 3 }
   { type: "entanglement_state",
     pairs: [ {a: {id, angle}, b: {id, angle}, correlated: true}, ... ],
     noise_rate: 0.1 }
@@ -120,9 +131,12 @@ WebSocket message types (backend → frontend):
 
 **Session state and the measure context.** The backend keeps per-connection
 state (gate, noise rate, robot count, shots, mode) so a bare
-`{ type: "measure" }` measures whatever was last simulated. That state is lost
-if the WebSocket reconnects, so the frontend also sends the simulated gate,
-noise rate, robot count, and shots with every measure. Fields that are present
+`{ type: "measure" }` measures whatever was last simulated or entangled. That
+state is lost if the WebSocket reconnects, so the frontend also sends the
+simulated gate, noise rate, robot count, shots, and mode with every measure.
+The mode decides which circuit is measured: the selected gate per robot, or a
+Bell state per pair. In Entanglement mode each robot carries `ideal_angle`
+(its partner's outcome), and an unpaired odd robot is left out of `robots`. Fields that are present
 override the session state; fields that are absent leave it unchanged.
 
 **Validation.** Robot count is clamped to 1–20, noise rate to 0.0–1.0, and
@@ -193,6 +207,7 @@ canvas so the user knows a result is on its way:
   (in Entanglement mode: "Simulating Bell pairs (H + CNOT) with noise rate 0.10")
 - Measure: "Collapsing wavefunction..." with a detail line such as
   "Measuring H gate with noise rate 0.10 · 256 shots"
+  (in Entanglement mode: "Measuring Bell pairs with noise rate 0.10 · 1 shot per pair")
 - Below the text, a thin animated scanning line. It stays still when the
   user's system is set to reduce motion
 - The overlay disappears as soon as superposition_state, entanglement_state,
@@ -230,18 +245,15 @@ canvas so the user knows a result is on its way:
     speed so a balanced pair never stalls
 - Different pairs do NOT coordinate with each other
 - When one robot in a pair receives a measurement result,
-  its partner instantly mirrors the correlated outcome
+  its partner instantly mirrors the correlated outcome: on Measure, each pair
+  is measured with a Bell state circuit and both robots snap to the same
+  angle (0° or 180°) unless decoherence broke the pair (Section 3.3)
+- A measured robot whose pair stayed correlated turns green; one whose pair
+  broke turns red, and its ghost faces its partner's angle. An unpaired odd
+  robot is not measured and stays blue
 - Decoherence is visible as the alignment gradually breaking down
   over time — random jitter proportional to the noise rate is added to each
   robot's direction, so the pair drifts apart in heading as noise increases
-
-> **Known limitation.** The entanglement_state message delivers correlated
-> Bell-pair outcomes, and the pair link shows whether each pair stayed
-> correlated. Pressing Measure in Entanglement Mode, however, currently runs the
-> single-qubit circuit for the selected gate on every robot, the same as in
-> Superposition Mode. It does not measure the Bell pairs, so the
-> "partner mirrors the correlated outcome" behavior above is not yet shown on
-> measurement.
 
 **Decoherence Visualization (both modes)**
 - A visible "ghost" shows where the robot would be at ideal (zero noise):
@@ -267,7 +279,7 @@ canvas so the user knows a result is on its way:
 | Reset | Button | Return all robots to neutral state |
 
 In Entanglement mode a note under the Shots slider explains that entangling
-runs one shot per pair, so the setting only affects Measure there.
+and measuring both run one shot per pair, so the setting does not apply there.
 
 **Button behavior**
 - Simulate, Measure, and Reset are disabled only while the WebSocket is
@@ -385,6 +397,8 @@ A single line above the explanation that changes based on simulation state:
 | Measuring | "Collapsing wavefunction..." |
 | Measured, fidelity ≥ 0.8 | "Measurement complete. Fidelity: [value]" |
 | Measured, fidelity < 0.8 | "High decoherence detected. Results unreliable." |
+| Bell pairs measured, fidelity ≥ 0.8 | "Measurement complete. [n] of [total] pairs stayed correlated. Fidelity: [value]" |
+| Bell pairs measured, fidelity < 0.8 | "High decoherence detected. Only [n] of [total] pairs stayed correlated." |
 | Entangled | "Robots entangled. Observe correlated behavior." |
 | Decoherence breaking entanglement (any pair uncorrelated) | "Decoherence is breaking entanglement." |
 | Measure pressed while idle | "Nothing to measure yet — press S or Simulate first." |
@@ -410,6 +424,11 @@ both a number and a small color-coded bar (green above 0.85, gold above 0.6,
 red below). Shots shows the slider value and, after a result, the shot count
 the backend actually used. All values are logged to CSV (Section 7).
 
+After measuring Bell pairs, Gate shows BELL, P(|1⟩) is the fraction of
+measured robots that landed on |1⟩, Ideal shows — (each robot's ideal is its
+partner's outcome), Shots shows 1, and Fidelity is the fraction of pairs that
+stayed correlated.
+
 ---
 
 ## 7. Data Logging
@@ -426,6 +445,10 @@ Angle Error, Fidelity, Knowledge Level Selected, Shots
 This extends the existing data format from quantum_robot_v1.py and
 data/quantum_tests_data_stage1.csv, making the simulation data directly
 comparable to the physical prototype data collected in Stage 1 of the project.
+
+Bell pair measurements (Entanglement mode) are logged with Gate Name `bell`,
+Shots `1`, Probability `0` or `1` (the single-shot outcome), Ideal Angle set to
+the partner's angle, and Fidelity `1` if the pair stayed correlated, else `0`.
 
 `Shots` was added with the Shots slider. It is the last column so the earlier
 columns keep their Stage 1 positions, and it matters for analysis: the same

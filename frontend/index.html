@@ -358,7 +358,7 @@
       <label for="shots">Shots <span class="hint">[ / ]</span></label>
       <input type="range" id="shots" min="0" max="12" step="1" value="8">
       <div style="text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums" id="shotsVal">256</div>
-      <div class="warn" id="shotsNote">Entangling runs one shot per pair, so here this setting only affects Measure.</div>
+      <div class="warn" id="shotsNote">Entanglement mode entangles and measures with one shot per pair, so this setting does not apply.</div>
     </div>
 
     <div class="field">
@@ -875,24 +875,33 @@
       if (state.phase === 'idle') return;   // reset while the measurement was in flight
       state.phase = 'measured';
       state.fidelity = msg.fidelity;
+      var bell = msg.mode === 'entanglement';
       var measuredGate = msg.gate || state.simGate;
-      var ideal = IDEAL[measuredGate].angle;
+      // Bell pairs have no single ideal angle: each robot's ideal is its partner's outcome
+      var ideal = bell ? null : IDEAL[measuredGate].angle;
       var sumP = 0, sumA = 0, sumE = 0, n = msg.robots.length;
 
       msg.robots.forEach(function (rd, i) {
-        var r = state.robots[i];
+        var r = state.robots[rd.id !== undefined ? rd.id : i];
         if (!r) return;
         r.prob = rd.prob;
         r.angleDeg = rd.angle;
         r.errorDeg = rd.error;
-        r.ghostDeg = ideal;
+        r.ghostDeg = rd.ideal_angle !== undefined ? rd.ideal_angle : ideal;
         r.targetHeading = (rd.angle - 90) * Math.PI / 180;
         sumP += rd.prob; sumA += rd.angle; sumE += rd.error;
       });
 
-      setStatus(msg.fidelity >= 0.8
-        ? 'Measurement complete. Fidelity: ' + msg.fidelity.toFixed(3)
-        : 'High decoherence detected. Results unreliable.');
+      if (bell) {
+        var pairText = msg.pairs_correlated + ' of ' + msg.pairs_total + (msg.pairs_total === 1 ? ' pair' : ' pairs');
+        setStatus(msg.fidelity >= 0.8
+          ? 'Measurement complete. ' + pairText + ' stayed correlated. Fidelity: ' + msg.fidelity.toFixed(3)
+          : 'High decoherence detected. Only ' + pairText + ' stayed correlated.');
+      } else {
+        setStatus(msg.fidelity >= 0.8
+          ? 'Measurement complete. Fidelity: ' + msg.fidelity.toFixed(3)
+          : 'High decoherence detected. Results unreliable.');
+      }
 
       setData({
         gate: measuredGate,
@@ -965,12 +974,14 @@
       return;
     }
     if (state.loading) return;   // ignore repeat triggers while a circuit runs
-    showLoading('measure', 'Collapsing wavefunction...',
-      'Measuring ' + state.simGate.toUpperCase() + ' gate with noise rate ' + state.noise.toFixed(2) + ' · ' + shotsLabel());
+    showLoading('measure', 'Collapsing wavefunction...', state.mode === 'entanglement'
+      ? 'Measuring Bell pairs with noise rate ' + state.noise.toFixed(2) + ' · 1 shot per pair'
+      : 'Measuring ' + state.simGate.toUpperCase() + ' gate with noise rate ' + state.noise.toFixed(2) + ' · ' + shotsLabel());
     setStatus('Collapsing wavefunction...');
     // Send the simulated context so the backend measures the same circuit the
     // robots are showing, even if its session state was lost on a reconnect.
-    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length, shots: state.shots });
+    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length,
+           shots: state.shots, mode: state.mode });
   }
 
   function doReset() {
