@@ -4,7 +4,7 @@ Decoherence and Qubit Behaviors
 **Author:** Sruti Nallakukkala
 **Institution:** Princeton International School of Mathematics and Science (PRISMS)
 **Stage:** Simulation (Stage 1 of 2 — Physical prototype is Stage 2)
-**Last Updated:** September 2026
+**Last Updated:** 16 September 2026 (see Section 13 for revision history)
 
 ---
 
@@ -63,11 +63,17 @@ The following gates are supported, carried over directly from quantum_robot.py:
 
 ### 3.2 Simulation Logic
 Carried over from quantum_robot.py with the following behavior:
-- Run Qiskit circuit with 1024 shots
+- Each robot is its own qubit, so each robot gets its own circuit run
+- Run the Qiskit circuit with a user-selected number of shots:
+  default 256, adjustable from 1 to 4096 in powers of two (Section 4.4).
+  The Stage 1 prototype used 1024; 256 was chosen as the default because it
+  is statistically sufficient for a pedagogical demonstration (standard
+  error on P(|1⟩) is at most 0.5/√256 ≈ 0.03) and returns results faster
+- The backend clamps shots to 1–4096; a missing or invalid value falls back to 256
 - Apply depolarizing noise model at the user-specified noise rate
 - Return: probability of |1⟩, computed angle (prob × 180), ideal angle,
   probability error, angle error, gate name, noise rate
-- All results logged to quantum_tests_data.csv (same format as existing file)
+- Every measurement is logged to data/quantum_swarm_data.csv (Section 7)
 
 ### 3.3 Entanglement Simulation (New)
 For entangled robot pairs:
@@ -79,6 +85,10 @@ For entangled robot pairs:
 - Because of the Bell state, outcomes are always correlated:
   both |00⟩ or both |11⟩
 - Noise is applied to both qubits via the same depolarizing error model
+- Each pair runs a single shot, so the Shots setting does not affect entangling
+- Robots are paired in order (0–1, 2–3, …). With an odd robot count the last
+  robot is left unpaired and is not simulated. Entanglement mode therefore
+  requires at least 2 robots (Section 4.4)
 
 ### 3.4 API Endpoints (FastAPI + WebSocket)
 
@@ -87,20 +97,37 @@ GET  /                         Serve the frontend HTML file
 WS   /ws                       Main WebSocket connection
 
 WebSocket message types (frontend → backend):
-  { type: "simulate",  gate: "h", noise_rate: 0.1, num_robots: 4 }
+  { type: "simulate",  gate: "h", noise_rate: 0.1, num_robots: 4, shots: 256 }
   { type: "measure" }          Trigger wavefunction collapse
-  { type: "entangle",  noise_rate: 0.1 }
+  { type: "measure",   gate: "h", noise_rate: 0.1, num_robots: 4, shots: 256 }
+                               Same, with optional context (see note)
+  { type: "entangle",  noise_rate: 0.1, num_robots: 4 }
   { type: "set_noise", noise_rate: 0.3 }
+
+  Any message may also carry knowledge_level: "beginner" | "intermediate" |
+  "advanced", which is recorded for CSV logging.
 
 WebSocket message types (backend → frontend):
   { type: "superposition_state", robots: [ {id, angle, prob}, ... ],
-    gate: "h", noise_rate: 0.1, ideal_angle: 90 }
+    gate: "h", noise_rate: 0.1, ideal_angle: 90, shots: 256 }
   { type: "measurement_result", robots: [ {id, angle, prob, error}, ... ],
-    fidelity: 0.92 }
-  { type: "entanglement_state", pairs: [ {a: {id, angle}, b: {id, angle}}, ... ],
+    fidelity: 0.92, gate: "h", shots: 256 }
+  { type: "entanglement_state",
+    pairs: [ {a: {id, angle}, b: {id, angle}, correlated: true}, ... ],
     noise_rate: 0.1 }
   { type: "error", message: "..." }
 ```
+
+**Session state and the measure context.** The backend keeps per-connection
+state (gate, noise rate, robot count, shots, mode) so a bare
+`{ type: "measure" }` measures whatever was last simulated. That state is lost
+if the WebSocket reconnects, so the frontend also sends the simulated gate,
+noise rate, robot count, and shots with every measure. Fields that are present
+override the session state; fields that are absent leave it unchanged.
+
+**Validation.** Robot count is clamped to 1–20, noise rate to 0.0–1.0, and
+shots to 1–4096. An unknown gate falls back to h. An unknown message type or a
+failed request returns an `error` message and keeps the connection open.
 
 ---
 
@@ -115,59 +142,112 @@ WebSocket message types (backend → frontend):
 |                   |                              |
 |   SIMULATION      |   CONTROL PANEL              |
 |   CANVAS          |   - Gate selector            |
-|   (robots move    |   - Robot count (4–20)       |
-|    here)          |   - Noise rate slider        |
-|                   |   - Mode buttons             |
+|   (robots move    |   - Robot count (1–20)       |
+|    here; loading  |   - Noise rate slider        |
+|    overlay shows  |   - Shots slider             |
+|    here while a   |   - Mode buttons             |
+|    circuit runs)  |   - Simulate/Measure/Reset   |
 |                   |   - Keypress hints           |
 +-------------------+------------------------------+
 |  EXPLANATION PANEL (changes dynamically)         |
 |  [ Beginner | Intermediate | Advanced ] toggle   |
+|  Status label, gate/mode explanation, Shots      |
 +--------------------------------------------------+
-|  DATA PANEL: prob | angle | error | fidelity     |
+|  DATA PANEL: gate | prob | angle | ideal | error |
+|              noise | shots | fidelity            |
 +--------------------------------------------------+
 ```
+
+Below 860px wide, the canvas and control panel stack vertically.
 
 ### 4.2 Simulation Canvas
 - HTML5 Canvas, 2D rendering context
 - Dark background (space/quantum aesthetic)
-- Robots rendered as small circular agents with a directional indicator
-  showing their current angle (like a compass needle)
+- Robots are rendered as directional vehicles inspired by Braitenberg vehicles:
+  - Body: a chassis 24px long by 16px wide
+  - Front: a flat edge with two small light sensor dots, one on each side,
+    like headlights or eyes. These make the facing direction obvious, so there
+    is no separate needle
+  - Back: a rounded rear edge
+  - The whole vehicle rotates to face its current heading. A measured angle
+    of 0° faces up, 90° faces right, and 180° faces down
+  - Size: full size up to 8 robots, shrinking gradually to 75% at 20 robots
+    to reduce crowding
 - Robot color indicates state:
   - Blue, wandering: superposition (pre-measurement)
   - Gold, synchronized: entangled pair
   - Green: measured, at ideal position
   - Red/orange: measured, with visible decoherence error
-    (the further from ideal, the more orange/red)
-- Trail effect: faint path behind each robot showing recent movement
+    (the further from ideal, the more orange/red; full red at 90° of error)
+- Entangled pairs are joined by a dashed gold line that fades as noise rises
+- Trail effect: faint path laid down from the center of each vehicle's rear
+  edge, showing recent movement. The trail breaks rather than drawing a line
+  across the canvas when a robot wraps to the opposite edge
+- Robots that leave one edge of the canvas reappear at the opposite edge
+
+**Loading overlay**
+While the backend is running a circuit, a translucent overlay covers the
+canvas so the user knows a result is on its way:
+- Simulate: "Running quantum circuit..." with a detail line such as
+  "Simulating H gate with noise rate 0.10 · 256 shots"
+  (in Entanglement mode: "Simulating Bell pairs (H + CNOT) with noise rate 0.10")
+- Measure: "Collapsing wavefunction..." with a detail line such as
+  "Measuring H gate with noise rate 0.10 · 256 shots"
+- Below the text, a thin animated scanning line. It stays still when the
+  user's system is set to reduce motion
+- The overlay disappears as soon as superposition_state, entanglement_state,
+  or measurement_result arrives, and also on an error, Reset, or disconnect
+- While the overlay is showing, further Simulate and Measure triggers are
+  ignored so repeated clicks or a held key cannot queue up circuit runs
 
 ### 4.3 Robot Behavior by Mode
 
 **Superposition Mode**
-- Robots move independently, each with its own randomized velocity,
-  heading, and wandering pattern
+- Robots move independently, each with its own randomized velocity
+  and wandering pattern
 - Movement is genuinely chaotic and individualistic — no coordination
+- Each vehicle turns to face the direction it is driving, with a slight
+  wobble, so it always moves nose-first
 - Robots do not collide with each other (pass through)
 - This represents the undefined, probabilistic nature of superposition
 - On measurement trigger: all robots snap to an angle determined by
   the Qiskit simulation result for the selected gate + noise rate
-- The snap is animated: robots smoothly rotate to their final angle
-  over ~0.5 seconds, then hold
+- The snap is animated: robots slow to a stop while smoothly rotating to
+  their final angle over ~0.5 seconds, then hold
+- A single robot is a valid configuration in this mode
 
 **Entanglement Mode**
-- Robots organized into pairs (2 robots per pair)
+- Requires at least 2 robots. Switching to this mode with 1 robot raises the
+  count to 2 and the status label explains why
+- Robots organized into pairs (2 robots per pair); with an odd count the last
+  robot is unpaired and wanders on its own as in Superposition Mode
 - Within each pair, robots use a simplified Boids algorithm:
-  - Alignment: both robots in a pair always face the same direction
+  - Alignment: each robot steers its velocity toward its partner's, so the
+    pair travels in the same direction
   - Cohesion: robots in a pair are drawn toward each other
   - Separation: robots maintain a minimum distance within the pair
+  - Vehicles face the direction they are driving and keep a minimum cruising
+    speed so a balanced pair never stalls
 - Different pairs do NOT coordinate with each other
 - When one robot in a pair receives a measurement result,
   its partner instantly mirrors the correlated outcome
 - Decoherence is visible as the alignment gradually breaking down
-  over time — the pair drifts apart in heading as noise increases
+  over time — random jitter proportional to the noise rate is added to each
+  robot's direction, so the pair drifts apart in heading as noise increases
+
+> **Known limitation.** The entanglement_state message delivers correlated
+> Bell-pair outcomes, and the pair link shows whether each pair stayed
+> correlated. Pressing Measure in Entanglement Mode, however, currently runs the
+> single-qubit circuit for the selected gate on every robot, the same as in
+> Superposition Mode. It does not measure the Bell pairs, so the
+> "partner mirrors the correlated outcome" behavior above is not yet shown on
+> measurement.
 
 **Decoherence Visualization (both modes)**
-- A visible "ghost" position shows where the robot would be at
-  ideal (zero noise) — rendered as a faint outline at the ideal angle
+- A visible "ghost" shows where the robot would be at ideal (zero noise):
+  the same vehicle shape at 20% opacity, facing the ideal angle for the gate
+- The ghost appears after measurement, drawn beneath the robot, so the part
+  that shows is the angular gap between ideal and actual
 - The gap between ghost and actual robot is the decoherence
 - As noise rate increases via the slider, the gap grows visibly
 
@@ -178,12 +258,25 @@ WebSocket message types (backend → frontend):
 | Control | Type | Function |
 |---------|------|----------|
 | Gate selector | Dropdown | Choose quantum gate (h, x, id, sx, y, z) |
-| Robot count | Number input + slider | Set number of robots (4–20, default 4) |
+| Robot count | Number input + slider | Set number of robots (1–20, default 4; minimum 2 in Entanglement mode) |
 | Noise rate | Slider (0.0–1.0, default 0.1) | Set depolarizing noise rate |
+| Shots | Slider (1–4096 in powers of two, default 256) | Set how many times each robot's circuit is run; applies on the next Simulate or Measure |
 | Mode | Toggle buttons | Switch between Superposition / Entanglement |
 | Simulate | Button | Run quantum circuit, enter superposition/entangle mode |
 | Measure | Button | Collapse wavefunction, snap robots to result |
 | Reset | Button | Return all robots to neutral state |
+
+In Entanglement mode a note under the Shots slider explains that entangling
+runs one shot per pair, so the setting only affects Measure there.
+
+**Button behavior**
+- Simulate, Measure, and Reset are disabled only while the WebSocket is
+  disconnected
+- Measure stays clickable before anything has been simulated; it then shows
+  "Nothing to measure yet — press S or Simulate first." instead of sending
+- Measure always measures the gate that was last simulated, even if the gate
+  selector has changed since
+- Changing the robot count or the mode resets the simulation to idle
 
 **Keyboard Shortcuts**
 | Key | Action |
@@ -195,9 +288,17 @@ WebSocket message types (backend → frontend):
 | 1–6 | Select gate (1=h, 2=x, 3=id, 4=sx, 5=y, 6=z) |
 | ↑ / ↓ | Increase / decrease noise rate by 0.05 |
 | + / - | Add / remove a robot (within cap) |
+| [ / ] | Halve / double the number of shots |
 
 All keyboard shortcuts are displayed as small hints next to their
-corresponding buttons in the UI.
+corresponding controls in the UI.
+
+Space works wherever keyboard focus is, including on the gate dropdown,
+sliders, robot count box, and buttons, and is only ignored while typing in a
+text field. It never scrolls the page, opens the dropdown, or activates a
+focused button, and holding it down triggers a single measurement. The other
+shortcuts are ignored while a dropdown or input has focus, so those controls
+keep their normal keyboard behavior.
 
 **Robot count cap:** Maximum 20 robots. Above this, performance on
 a standard laptop degrades noticeably. A warning appears at 15+.
@@ -240,18 +341,57 @@ Three modes, user-selectable via a toggle at the top of the panel:
   (1-ε)ρ + (ε/3)(XρX + YρY + ZρZ). The servo angle maps
   P(|1⟩) × 180°, consistent with Nallakukkala (2026)."
 
-### 5.2 Dynamic Status Label
+### 5.2 Shots Explanation
+Below the gate or entanglement explanation, a second paragraph headed
+"Shots" explains the Shots control. It follows the same knowledge level
+toggle and is shown in both modes.
+
+**Beginner**
+  "A shot is one run of the experiment. Each run only ever gives a yes or a
+  no — like one toss of a coin, which lands heads or tails, never
+  half-and-half. To find out how likely heads really is, you toss it many
+  times and count. More shots means a more trustworthy answer. Try 1 shot
+  with the H gate and watch the robots jump all the way to 0° or 180°."
+
+**Intermediate**
+  "A single measurement returns only 0 or 1, so P(|1⟩) has to be estimated
+  by running the circuit many times (shots) and counting the 1s. For the H
+  gate that estimate scatters by about ±0.5/√N: roughly ±0.03 at 256 shots
+  and ±0.016 at 1024. This sampling scatter is separate from noise — more
+  shots shrink it, but they cannot remove the error that noise causes."
+
+**Advanced**
+  "The reported probability is the estimator p̂ = k/N, where
+  k ~ Binomial(N, p) over N shots. It is unbiased with standard error
+  √(p(1−p)/N), largest at p = 0.5 (0.5/√N) and zero at p = 0 or 1, so X, Y,
+  ID and Z are exact at ε = 0 while H and SX are not. Because fidelity is
+  computed as 1 − |p̂ − p_ideal|, finite sampling lowers it even without noise
+  (mean |p̂ − p| ≈ 0.4/√N at p = 0.5 for large N). The angle int(p̂ × 180)
+  also has a resolution of 180/N degrees, so at N = 1 only 0° or 180° is
+  possible."
+
+These figures were checked against the simulator: with 20 robots on the H
+gate and no noise, the observed spread of P(|1⟩) was 0.028 at 256 shots
+(predicted 0.031) and 0.0085 at 4096 shots (predicted 0.0078).
+
+### 5.3 Dynamic Status Label
 A single line above the explanation that changes based on simulation state:
 
 | State | Label |
 |-------|-------|
 | Idle | "Select a gate and press S or Simulate to begin." |
+| Circuit running (after Simulate) | "Quantum circuit running..." |
 | Superposition active | "Robots are in superposition — state undefined." |
 | Measuring | "Collapsing wavefunction..." |
-| Measured, low noise | "Measurement complete. Fidelity: [value]" |
-| Measured, high noise | "High decoherence detected. Results unreliable." |
+| Measured, fidelity ≥ 0.8 | "Measurement complete. Fidelity: [value]" |
+| Measured, fidelity < 0.8 | "High decoherence detected. Results unreliable." |
 | Entangled | "Robots entangled. Observe correlated behavior." |
-| Decoherence breaking entanglement | "Decoherence is breaking entanglement." |
+| Decoherence breaking entanglement (any pair uncorrelated) | "Decoherence is breaking entanglement." |
+| Measure pressed while idle | "Nothing to measure yet — press S or Simulate first." |
+| Entanglement selected with 1 robot | "Entanglement needs a pair of qubits, so the robot count was raised to 2." |
+| Simulate or Measure while disconnected | "Not connected to the backend — cannot simulate yet." / "… cannot measure yet." |
+| Connection lost while a circuit was running | "Connection lost while the circuit was running — retrying." |
+| Backend error | "Error: [message]" |
 
 ---
 
@@ -261,28 +401,44 @@ A compact bar below the explanation panel showing live values:
 
 ```
 Gate: H  |  P(|1⟩): 0.487  |  Angle: 87°  |  Ideal: 90°  |
-Error: 3°  |  Fidelity: 0.97  |  Noise Rate: 0.10
+Error: 3°  |  Noise Rate: 0.10  |  Shots: 256  |  Fidelity: 0.97
 ```
 
-Values update after each measurement. Fidelity is displayed as both
-a number and a small color-coded bar (green = high, red = low).
-All values are logged to CSV in the same format as quantum_tests_data.csv.
+Values update after each measurement. P(|1⟩), Angle, and Error are averages
+across all robots, and Fidelity is the swarm average. Fidelity is displayed as
+both a number and a small color-coded bar (green above 0.85, gold above 0.6,
+red below). Shots shows the slider value and, after a result, the shot count
+the backend actually used. All values are logged to CSV (Section 7).
 
 ---
 
 ## 7. Data Logging
 
-Every measurement event is logged to quantum_swarm_data.csv with columns:
+Every measurement event is logged to data/quantum_swarm_data.csv, one row per
+robot, with columns:
 
 ```
 Timestamp, Gate Name, Noise Rate, Num Robots, Mode,
 Probability, Angle, Ideal Angle, Probability Error,
-Angle Error, Fidelity, Knowledge Level Selected
+Angle Error, Fidelity, Knowledge Level Selected, Shots
 ```
 
-This extends the existing data format from quantum_robot.py and
-quantum_tests_data.csv, making the simulation data directly comparable
-to the physical prototype data collected in Stage 1 of the project.
+This extends the existing data format from quantum_robot_v1.py and
+data/quantum_tests_data_stage1.csv, making the simulation data directly
+comparable to the physical prototype data collected in Stage 1 of the project.
+
+`Shots` was added with the Shots slider. It is the last column so the earlier
+columns keep their Stage 1 positions, and it matters for analysis: the same
+probability error means something very different at 1 shot than at 4096.
+
+If an existing quantum_swarm_data.csv has a different header (for example, one
+written before the Shots column existed), the backend does not append to it.
+It renames the file to `quantum_swarm_data_old_format_<timestamp>.csv` and
+starts a new file, so rows are never misaligned. Rows in an archived file have
+no recorded shot count; they were run at 1024 shots before the default changed
+and at 256 afterwards, and the two cannot be told apart.
+
+Runtime CSVs in data/ are gitignored; only the Stage 1 dataset is tracked.
 
 ---
 
@@ -291,16 +447,30 @@ to the physical prototype data collected in Stage 1 of the project.
 ```
 quantum_swarm_sim/
 ├── backend/
-│   ├── main.py              # FastAPI app, WebSocket handler
-│   ├── quantum_engine.py    # Qiskit simulation logic (adapted from quantum_robot.py)
-│   └── requirements.txt     # fastapi, uvicorn, qiskit, qiskit-aer, websockets
+│   ├── main.py                        # FastAPI app, WebSocket handler
+│   ├── quantum_engine.py              # Qiskit simulation logic (adapted from quantum_robot_v1.py)
+│   ├── quantum_robot_v1.py            # Stage 1 prototype, preserved unchanged for reference
+│   └── requirements.txt               # fastapi, uvicorn, qiskit, qiskit-aer, websockets
 ├── frontend/
-│   ├── index.html           # Single HTML file, all CSS and JS inline
-│   └── (no external deps)
+│   └── index.html                     # Single HTML file, all CSS and JS inline, no external deps
 ├── data/
-│   └── quantum_swarm_data.csv   # Auto-created on first measurement
-└── spec/
-    └── quantum_swarm_simulation_spec.md   # This document
+│   ├── quantum_tests_data_stage1.csv  # Stage 1 experimental data (tracked)
+│   ├── .gitkeep                       # Keeps data/ tracked
+│   ├── quantum_swarm_data.csv         # Auto-created on first measurement (gitignored)
+│   └── quantum_swarm_data_old_format_<timestamp>.csv   # Archived older-format logs, if any (gitignored)
+├── docs/                              # Figures: concept map, methodology, Bloom's taxonomy, gate results
+├── legacy/                            # Archived Stage 1 prototype files
+│   ├── data_analysis.py
+│   ├── h_gate.py
+│   ├── python_test_bridge.py
+│   ├── qiskit_test_bridge.py
+│   ├── superposition_test_bridge.py
+│   ├── servo_test.ino
+│   ├── sketch_apr20a.ino
+│   └── Quantum Bits, Gates, and Circuits.ipynb
+├── spec/
+│   └── quantum_swarm_simulation_spec.md   # This document
+└── README.md
 ```
 
 ---
@@ -335,16 +505,22 @@ The following are explicitly out of scope for Stage 1 (simulation):
 
 | Existing File | Role in Simulation |
 |--------------|-------------------|
-| quantum_robot.py | quantum_engine.py is a direct adaptation — serial removed, WebSocket added |
-| superposition_test_bridge.py | RY rotation logic informs superposition mode |
-| qiskit_test_bridge.py | Single-shot measurement logic informs Measure trigger |
-| data_analysis.py | Data panel visualizations inspired by existing graphs |
-| quantum_tests_data.csv | New CSV extends same column format |
-| sketch_apr20a.ino | Not used in simulation; relevant in Stage 2 |
+| backend/quantum_robot_v1.py (originally quantum_robot.py) | quantum_engine.py is a direct adaptation — serial removed, WebSocket added |
+| legacy/superposition_test_bridge.py | RY rotation logic informs superposition mode |
+| legacy/qiskit_test_bridge.py | Single-shot measurement logic informs Measure trigger |
+| legacy/data_analysis.py | Data panel visualizations inspired by existing graphs |
+| data/quantum_tests_data_stage1.csv (originally quantum_tests_data.csv) | New CSV extends same column format |
+| legacy/sketch_apr20a.ino | Not used in simulation; relevant in Stage 2 |
 
 ---
 
 ## 12. Claude Code Prompt Sequence
+
+> **Historical record.** These are the original prompts used to build the
+> first version of the project, kept unchanged. Some details in them are now
+> out of date (for example, circular robots with a directional needle, a
+> 4-robot minimum, and 1024 shots). Sections 1–11 describe the current system,
+> and Section 13 lists what changed afterwards.
 
 Run these prompts in order, one at a time. Wait for Claude Code to finish
 each step before sending the next. Do not combine them into one message —
@@ -531,3 +707,16 @@ Paste this after Prompt 4 is complete:
 >
 > Then tell me if there is anything I need to do manually before
 > pushing to GitHub."
+
+---
+
+## 13. Revision History
+
+Changes made after the original build (Prompts 1–5), newest first.
+
+| Commit | Change |
+|--------|--------|
+| dddd208 | Robots redesigned as Braitenberg-style vehicles with a flat front, two sensor dots, and a rounded rear; the needle was removed. The ghost uses the same shape at 20% opacity and the trail follows the rear edge. Vehicles face their direction of travel, and entangled pairs use velocity alignment. Minimum robot count lowered from 4 to 1, with at least 2 required in Entanglement mode |
+| a6d4935, 934d64e | Shots slider (1–4096, default 256) with `[` / `]` shortcuts and a Shots explanation at all three knowledge levels. Backend accepts `shots` on simulate and measure and echoes it back. CSV gains a trailing Shots column; older-format files are archived. Active knowledge-level button no longer loses its label on hover |
+| b76767c | Default shots reduced from 1024 to 256. Loading overlay on the canvas while a circuit runs, with matching "Quantum circuit running..." and "Collapsing wavefunction..." status labels |
+| 528a5ee | Measure button and Space shortcut repaired. Space now works while a control has focus and cannot re-trigger a focused button; holding it sends one request. Measure is clickable before simulating and explains what to do. Measure sends the simulated gate, noise rate, and robot count so reconnects and gate changes do not measure the wrong circuit; measurement_result includes the gate |
