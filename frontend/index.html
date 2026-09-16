@@ -171,7 +171,16 @@
     font-weight: 600;
   }
 
-  #explanationText { margin: 0; color: #c7d1e8; font-size: 13.5px; }
+  #explanationText, #shotsText { margin: 0; color: #c7d1e8; font-size: 13.5px; }
+
+  .sub-h {
+    margin: 14px 0 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: var(--muted);
+    font-weight: 600;
+  }
 
   .data-grid {
     display: grid;
@@ -346,6 +355,13 @@
     </div>
 
     <div class="field">
+      <label for="shots">Shots <span class="hint">[ / ]</span></label>
+      <input type="range" id="shots" min="0" max="12" step="1" value="8">
+      <div style="text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums" id="shotsVal">256</div>
+      <div class="warn" id="shotsNote">Entanglement mode runs one shot per pair, so this setting does not apply.</div>
+    </div>
+
+    <div class="field">
       <label>Mode <span class="hint">E</span></label>
       <div class="row">
         <button id="modeSuper" class="active">Superposition</button>
@@ -375,6 +391,8 @@
     </div>
     <div id="statusLabel">Select a gate and press S or Simulate to begin.</div>
     <p id="explanationText"></p>
+    <h3 class="sub-h">Shots</h3>
+    <p id="shotsText"></p>
   </div>
 
   <div class="panel">
@@ -386,6 +404,7 @@
       <div class="stat"><div class="k">Ideal</div><div class="v" id="dIdeal">—</div></div>
       <div class="stat"><div class="k">Error</div><div class="v" id="dError">—</div></div>
       <div class="stat"><div class="k">Noise rate</div><div class="v" id="dNoise">0.10</div></div>
+      <div class="stat"><div class="k">Shots</div><div class="v" id="dShots">256</div></div>
       <div class="stat">
         <div class="k">Fidelity</div>
         <div class="v" id="dFid">—</div>
@@ -401,6 +420,8 @@
 
   // ---------- constants ----------
   var MIN_ROBOTS = 4, MAX_ROBOTS = 20, WARN_ROBOTS = 15;
+  // Shots slider steps through powers of two: 2^0 = 1 up to 2^12 = 4096.
+  var MIN_SHOTS_EXP = 0, MAX_SHOTS_EXP = 12, DEFAULT_SHOTS_EXP = 8;
   var IDEAL = {
     h:  { prob: 0.5, angle: 90 },
     x:  { prob: 1.0, angle: 180 },
