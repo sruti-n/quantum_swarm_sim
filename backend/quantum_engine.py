@@ -17,6 +17,10 @@ from qiskit_aer.noise import NoiseModel, depolarizing_error
 
 
 class QuantumEngine:
+    # 256 shots is statistically sufficient for a pedagogical demo (standard error on
+    # P(|1>) is at most ~0.03) and returns results faster than the prototype's 1024.
+    DEFAULT_SHOTS = 256
+
     def __init__(self):
         # The simulation CSV lives in data/ at the project root, one level up from backend/.
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,7 +36,7 @@ class QuantumEngine:
             'z':  {'prob': 0.0, 'angle': 0}
         }
 
-    def simulate(self, gate_name, total_shots, error_rate):
+    def simulate(self, gate_name, total_shots=DEFAULT_SHOTS, error_rate=0.0):
         # Create and draw a quantum circuit with one qubit and one classical bit for measurement
         qc = QuantumCircuit(1, 1)
 

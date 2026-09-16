@@ -20,8 +20,9 @@ engine = QuantumEngine()
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_FILE = os.path.join(PROJECT_ROOT, "frontend", "index.html")
 
-# Every circuit is run with 1024 shots, matching the Stage 1 prototype.
-TOTAL_SHOTS = 1024
+# Every circuit is run with the engine's default shot count (256), reduced from the
+# Stage 1 prototype's 1024 for faster feedback in the browser.
+TOTAL_SHOTS = QuantumEngine.DEFAULT_SHOTS
 
 MIN_ROBOTS = 4
 MAX_ROBOTS = 20

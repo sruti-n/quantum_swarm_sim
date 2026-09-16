@@ -227,6 +227,52 @@
 
   .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
 
+  #loadingOverlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(2,4,10,.72);
+    pointer-events: none;
+    text-align: center;
+    padding: 16px;
+  }
+  #loadingOverlay.on { display: flex; }
+
+  #loadingTitle { font-size: 15px; font-weight: 600; color: var(--text); }
+  #loadingDetail { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .scan {
+    position: relative;
+    width: 160px;
+    height: 2px;
+    margin-top: 10px;
+    border-radius: 999px;
+    background: #22304d;
+    overflow: hidden;
+  }
+
+  .scan::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 1.1s ease-in-out infinite;
+  }
+
+  @keyframes scan {
+    from { left: -40%; }
+    to   { left: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scan::after { animation: none; left: 30%; }
+  }
+
   #connDot {
     display: inline-block;
     width: 7px; height: 7px;
@@ -263,6 +309,11 @@
       <span><i style="background:#4ade80"></i>Measured (ideal)</span>
       <span><i style="background:#ff6b5e"></i>Decoherence error</span>
       <span><i style="background:transparent;border:1px solid #6c7a9c"></i>Ghost = ideal</span>
+    </div>
+    <div id="loadingOverlay" role="status" aria-live="polite">
+      <div id="loadingTitle"></div>
+      <div id="loadingDetail"></div>
+      <div class="scan"></div>
     </div>
   </div>
 
@@ -369,7 +420,7 @@
     count: 4,
     level: 'beginner',
     simGate: 'h',                // gate the robots were actually simulated with
-    measuring: false,            // a measure request is in flight
+    loading: null,               // null | 'simulate' | 'measure' — request in flight
     fidelity: null,
     robots: [],
     pairs: []
@@ -385,6 +436,7 @@
   var modeIndicator = $('modeIndicator'), statusLabel = $('statusLabel');
   var explanationText = $('explanationText');
   var connDot = $('connDot'), connText = $('connText');
+  var loadingOverlay = $('loadingOverlay'), loadingTitle = $('loadingTitle'), loadingDetail = $('loadingDetail');
 
   // ---------- canvas sizing ----------
   var dpr = window.devicePixelRatio || 1;
@@ -659,6 +711,19 @@
     }
   }
 
+  // ---------- loading overlay ----------
+  function showLoading(kind, title, detail) {
+    state.loading = kind;
+    loadingTitle.textContent = title;
+    loadingDetail.textContent = detail;
+    loadingOverlay.classList.add('on');
+  }
+
+  function hideLoading() {
+    state.loading = null;
+    loadingOverlay.classList.remove('on');
+  }
+
   // ---------- websocket ----------
   var ws = null;
 
@@ -676,7 +741,10 @@
     ws.onclose = function () {
       connDot.classList.remove('on');
       connText.textContent = 'disconnected — retrying';
-      state.measuring = false;
+      if (state.loading) {
+        hideLoading();
+        setStatus('Connection lost while the circuit was running — retrying.');
+      }
       setControlsEnabled(false);
       setTimeout(connect, 2000);
     };
@@ -705,6 +773,7 @@
 
   function handleMessage(msg) {
     if (msg.type === 'superposition_state') {
+      hideLoading();
       state.phase = 'super';
       state.gate = msg.gate;
       state.simGate = msg.gate;
@@ -727,7 +796,7 @@
       setControlsEnabled(true);
 
     } else if (msg.type === 'measurement_result') {
-      state.measuring = false;
+      hideLoading();
       if (state.phase === 'idle') return;   // reset while the measurement was in flight
       state.phase = 'measured';
       state.fidelity = msg.fidelity;
@@ -762,6 +831,7 @@
       updateModeIndicator();
 
     } else if (msg.type === 'entanglement_state') {
+      hideLoading();
       state.phase = 'entangled';
       state.noise = msg.noise_rate;
       state.pairs = msg.pairs;
@@ -785,20 +855,27 @@
       setControlsEnabled(true);
 
     } else if (msg.type === 'error') {
-      state.measuring = false;
+      hideLoading();
       setStatus('Error: ' + msg.message);
     }
   }
 
   // ---------- actions ----------
   function doSimulate() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setStatus('Not connected to the backend — cannot simulate yet.');
+      return;
+    }
+    if (state.loading) return;   // a circuit is already running
+    var noiseText = 'noise rate ' + state.noise.toFixed(2);
     if (state.mode === 'entanglement') {
-      setStatus('Entangling pairs…');
+      showLoading('simulate', 'Running quantum circuit...', 'Simulating Bell pairs (H + CNOT) with ' + noiseText);
       send({ type: 'entangle', noise_rate: state.noise, num_robots: state.count });
     } else {
-      setStatus('Running circuit…');
+      showLoading('simulate', 'Running quantum circuit...', 'Simulating ' + state.gate.toUpperCase() + ' gate with ' + noiseText);
       send({ type: 'simulate', gate: state.gate, noise_rate: state.noise, num_robots: state.count });
     }
+    setStatus('Quantum circuit running...');
   }
 
   function doMeasure() {
@@ -810,9 +887,10 @@
       setStatus('Nothing to measure yet — press S or Simulate first.');
       return;
     }
-    if (state.measuring) return;   // ignore repeat clicks while a measurement runs
-    state.measuring = true;
-    setStatus('Collapsing wavefunction…');
+    if (state.loading) return;   // ignore repeat triggers while a circuit runs
+    showLoading('measure', 'Collapsing wavefunction...',
+      'Measuring ' + state.simGate.toUpperCase() + ' gate with noise rate ' + state.noise.toFixed(2));
+    setStatus('Collapsing wavefunction...');
     // Send the simulated context so the backend measures the same circuit the
     // robots are showing, even if its session state was lost on a reconnect.
     send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length });
@@ -820,7 +898,7 @@
 
   function doReset() {
     state.phase = 'idle';
-    state.measuring = false;
+    hideLoading();
     state.fidelity = null;
     rebuildRobots();
     setStatus('Select a gate and press S or Simulate to begin.');
