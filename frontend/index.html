@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantum Swarm Simulation</title>
+<style>
+  :root {
+    --bg: #05070f;
+    --panel: #0d1220;
+    --panel-2: #131a2c;
+    --line: #232c44;
+    --text: #e6ebf7;
+    --muted: #8b97b4;
+    --accent: #4da3ff;
+    --gold: #ffc65c;
+    --green: #4ade80;
+    --red: #ff6b5e;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  header .sub {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  #modeIndicator {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 290px;
+    gap: 16px;
+    padding: 16px 20px;
+  }
+
+  .canvas-wrap {
+    position: relative;
+    background: #02040a;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 420px;
+  }
+
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .panel h2 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .field { margin-bottom: 13px; }
+
+  .field label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+
+  .hint {
+    font-size: 10px;
+    color: #5f6b88;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  select, input[type="number"] {
+    width: 100%;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 13px;
+  }
+
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #04121f; }
+  button.primary { background: #16233c; border-color: #2c4a7a; }
+
+  .warn {
+    display: none;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--gold);
+    line-height: 1.35;
+  }
+
+  .lower { padding: 0 20px 20px; display: grid; gap: 16px; }
+
+  .level-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
+  .level-toggle button { flex: 1; }
+
+  #statusLabel {
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  #explanationText { margin: 0; color: #c7d1e8; font-size: 13.5px; }
+
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+  }
+
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+
+  .stat .k {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--muted);
+  }
+
+  .stat .v {
+    font-size: 17px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+
+  #fidelityBar {
+    height: 4px;
+    border-radius: 999px;
+    background: #22304d;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+
+  #fidelityFill { height: 100%; width: 0%; background: var(--green); transition: width .3s, background .3s; }
+
+  .legend {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 10.5px;
+    color: var(--muted);
+    background: rgba(5,7,15,.75);
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+  }
+
+  .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+
+  #connDot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--red);
+    margin-right: 6px;
+  }
+  #connDot.on { background: var(--green); }
+
+  @media (max-width: 860px) {
+    .main { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Bridging the Quantum Gap — Quantum Swarm Simulation</h1>
+    <p class="sub">Sruti Nallakukkala · PRISMS Applied Physics Research Lab · Stage 1</p>
+  </div>
+  <div>
+    <span id="connDot"></span><span id="connText" style="font-size:11px;color:var(--muted)">connecting…</span>
+    <span id="modeIndicator" style="margin-left:10px">Idle</span>
+  </div>
+</header>
+
+<div class="main">
+  <div class="canvas-wrap">
+    <canvas id="sim"></canvas>
+    <div class="legend">
+      <span><i style="background:#4da3ff"></i>Superposition</span>
+      <span><i style="background:#ffc65c"></i>Entangled</span>
+      <span><i style="background:#4ade80"></i>Measured (ideal)</span>
+      <span><i style="background:#ff6b5e"></i>Decoherence error</span>
+      <span><i style="background:transparent;border:1px solid #6c7a9c"></i>Ghost = ideal</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Controls</h2>
+
+    <div class="field">
+      <label for="gate">Gate <span class="hint">1–6</span></label>
+      <select id="gate">
+        <option value="h">H — Hadamard (superposition)</option>
+        <option value="x">X — Pauli-X (flip)</option>
+        <option value="id">ID — Identity (no-op)</option>
+        <option value="sx">SX — √X (half-flip)</option>
+        <option value="y">Y — Pauli-Y</option>
+        <option value="z">Z — Pauli-Z (phase flip)</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="robotCount">Robots <span class="hint">+ / −</span></label>
+      <input type="number" id="robotCount" min="4" max="20" value="4">
+      <input type="range" id="robotRange" min="4" max="20" value="4" style="margin-top:6px">
+      <div class="warn" id="robotWarn">Performance may degrade above 15 robots on a standard laptop.</div>
+    </div>
+
+    <div class="field">
+      <label for="noise">Noise rate <span class="hint">↑ / ↓</span></label>
+      <input type="range" id="noise" min="0" max="1" step="0.01" value="0.1">
+      <div style="text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums" id="noiseVal">0.10</div>
+    </div>
+
+    <div class="field">
+      <label>Mode <span class="hint">E</span></label>
+      <div class="row">
+        <button id="modeSuper" class="active">Superposition</button>
+        <button id="modeEnt">Entanglement</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="row" style="margin-bottom:8px">
+        <button id="btnSimulate" class="primary">Simulate <span class="hint">S</span></button>
+      </div>
+      <div class="row">
+        <button id="btnMeasure">Measure <span class="hint">Space</span></button>
+        <button id="btnReset">Reset <span class="hint">R</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="lower">
+  <div class="panel">
+    <h2>Explanation</h2>
+    <div class="level-toggle">
+      <button data-level="beginner" class="active">Beginner</button>
+      <button data-level="intermediate">Intermediate</button>
+      <button data-level="advanced">Advanced</button>
+    </div>
+    <div id="statusLabel">Select a gate and press S or Simulate to begin.</div>
+    <p id="explanationText"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Data</h2>
+    <div class="data-grid">
+      <div class="stat"><div class="k">Gate</div><div class="v" id="dGate">—</div></div>
+      <div class="stat"><div class="k">P(|1⟩)</div><div class="v" id="dProb">—</div></div>
+      <div class="stat"><div class="k">Angle</div><div class="v" id="dAngle">—</div></div>
+      <div class="stat"><div class="k">Ideal</div><div class="v" id="dIdeal">—</div></div>
+      <div class="stat"><div class="k">Error</div><div class="v" id="dError">—</div></div>
+      <div class="stat"><div class="k">Noise rate</div><div class="v" id="dNoise">0.10</div></div>
+      <div class="stat">
+        <div class="k">Fidelity</div>
+        <div class="v" id="dFid">—</div>
+        <div id="fidelityBar"><div id="fidelityFill"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- constants ----------
+  var MIN_ROBOTS = 4, MAX_ROBOTS = 20, WARN_ROBOTS = 15;
+  var IDEAL = {
+    h:  { prob: 0.5, angle: 90 },
+    x:  { prob: 1.0, angle: 180 },
+    id: { prob: 0.0, angle: 0 },
+    sx: { prob: 0.5, angle: 90 },
+    y:  { prob: 1.0, angle: 180 },
+    z:  { prob: 0.0, angle: 0 }
+  };
+  var GATE_KEYS = ['h', 'x', 'id', 'sx', 'y', 'z'];
+
+  // ---------- state ----------
+  var state = {
+    mode: 'superposition',       // 'superposition' | 'entanglement'
+    phase: 'idle',               // 'idle' | 'super' | 'entangled' | 'measured'
+    gate: 'h',
+    noise: 0.1,
+    count: 4,
+    level: 'beginner',
+    fidelity: null,
+    robots: [],
+    pairs: []
+  };
+
+  // ---------- elements ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('sim'), ctx = canvas.getContext('2d');
+  var gateSel = $('gate'), countInput = $('robotCount'), countRange = $('robotRange');
+  var noiseInput = $('noise'), noiseVal = $('noiseVal'), robotWarn = $('robotWarn');
+  var btnSimulate = $('btnSimulate'), btnMeasure = $('btnMeasure'), btnReset = $('btnReset');
+  var modeSuper = $('modeSuper'), modeEnt = $('modeEnt');
+  var modeIndicator = $('modeIndicator'), statusLabel = $('statusLabel');
+  var explanationText = $('explanationText');
+  var connDot = $('connDot'), connText = $('connText');
+
+  // ---------- canvas sizing ----------
+  var dpr = window.devicePixelRatio || 1;
+  function resize() {
+    var r = canvas.parentElement.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(r.width * dpr));
+    canvas.height = Math.max(1, Math.floor(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  function viewW() { return canvas.width / dpr; }
+  function viewH() { return canvas.height / dpr; }
+
+  // ---------- robot model ----------
+  function makeRobot(id, n) {
+    var w = viewW() || 600, h = viewH() || 420;
+    return {
+      id: id,
+      x: w * (0.2 + 0.6 * Math.random()),
+      y: h * (0.2 + 0.6 * Math.random()),
+      vx: (Math.random() - 0.5) * 1.6,
+      vy: (Math.random() - 0.5) * 1.6,
+      heading: Math.random() * Math.PI * 2,   // rendered needle direction (radians)
+      targetHeading: null,                     // set on measurement
+      wander: Math.random() * Math.PI * 2,
+      pair: Math.floor(id / 2),
+      prob: null,
+      angleDeg: null,
+      errorDeg: null,
+      ghostDeg: null,
+      trail: []
+    };
+  }
+
+  function rebuildRobots() {
+    var list = [];
+    for (var i = 0; i < state.count; i++) list.push(makeRobot(i, state.count));
+    state.robots = list;
+  }
+
+  // ---------- rendering ----------
+  function colorFor(r) {
+    if (state.phase === 'entangled') return '#ffc65c';
+    if (state.phase === 'measured' && r.errorDeg !== null) {
+      // green at zero error, ramping to red as the angle error grows
+      var t = Math.min(1, r.errorDeg / 90);
+      var cr = Math.round(74 + (255 - 74) * t);
+      var cg = Math.round(222 + (107 - 222) * t);
+      var cb = Math.round(128 + (94 - 128) * t);
+      return 'rgb(' + cr + ',' + cg + ',' + cb + ')';
+    }
+    return '#4da3ff';
+  }
+
+  function drawRobot(r) {
+    var col = colorFor(r);
+
+    // trail
+    if (r.trail.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(r.trail[0].x, r.trail[0].y);
+      for (var i = 1; i < r.trail.length; i++) ctx.lineTo(r.trail[i].x, r.trail[i].y);
+      ctx.strokeStyle = 'rgba(120,160,220,0.13)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    // ghost: where the robot would sit with zero noise
+    if (r.ghostDeg !== null) {
+      var g = (r.ghostDeg - 90) * Math.PI / 180;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 9, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(140,155,190,0.38)';
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y);
+      ctx.lineTo(r.x + Math.cos(g) * 17, r.y + Math.sin(g) * 17);
+      ctx.strokeStyle = 'rgba(140,155,190,0.38)';
+      ctx.stroke();
+    }
+
+    // body
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+
+    // directional needle
+    ctx.beginPath();
+    ctx.moveTo(r.x, r.y);
+    ctx.lineTo(r.x + Math.cos(r.heading) * 15, r.y + Math.sin(r.heading) * 15);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function drawPairLinks() {
+    if (state.phase !== 'entangled') return;
+    var byPair = {};
+    state.robots.forEach(function (r) {
+      (byPair[r.pair] = byPair[r.pair] || []).push(r);
+    });
+    Object.keys(byPair).forEach(function (k) {
+      var p = byPair[k];
+      if (p.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(p[0].x, p[0].y);
+      ctx.lineTo(p[1].x, p[1].y);
+      // link fades as noise rises — decoherence breaking entanglement
+      ctx.strokeStyle = 'rgba(255,198,92,' + (0.42 * (1 - state.noise)).toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  }
+
+  // ---------- physics ----------
+  function wrap(r, w, h) {
+    if (r.x < 0) r.x += w; if (r.x > w) r.x -= w;
+    if (r.y < 0) r.y += h; if (r.y > h) r.y -= h;
+  }
+
+  function stepSuperposition(r, w, h) {
+    // genuinely chaotic, individual wandering — no coordination between robots
+    r.wander += (Math.random() - 0.5) * 0.45;
+    r.vx += Math.cos(r.wander) * 0.09;
+    r.vy += Math.sin(r.wander) * 0.09;
+    var sp = Math.hypot(r.vx, r.vy), max = 1.9;
+    if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
+    r.x += r.vx; r.y += r.vy;
+    wrap(r, w, h);
+    r.heading += (Math.random() - 0.5) * 0.3;
+  }
+
+  function stepBoidsPair(r, partner, w, h) {
+    // simplified Boids within a pair only; different pairs do not coordinate
+    var dx = partner.x - r.x, dy = partner.y - r.y;
+    var d = Math.hypot(dx, dy) || 1;
+
+    // cohesion
+    r.vx += (dx / d) * 0.035;
+    r.vy += (dy / d) * 0.035;
+
+    // separation
+    if (d < 46) { r.vx -= (dx / d) * 0.08; r.vy -= (dy / d) * 0.08; }
+
+    // alignment: pair shares a heading, degraded by noise (decoherence)
+    var drift = state.noise * 0.55;
+    var target = partner.heading + (Math.random() - 0.5) * drift;
+    r.heading += angleDelta(r.heading, target) * 0.05;
+
+    var sp = Math.hypot(r.vx, r.vy), max = 1.5;
+    if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
+    r.x += r.vx; r.y += r.vy;
+    wrap(r, w, h);
+  }
+
+  function angleDelta(from, to) {
+    var d = (to - from) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function stepMeasured(r) {
+    // animate the snap toward the measured angle (~0.5s), then hold
+    if (r.targetHeading === null) return;
+    r.heading += angleDelta(r.heading, r.targetHeading) * 0.12;
+    r.vx *= 0.88; r.vy *= 0.88;
+    r.x += r.vx; r.y += r.vy;
+  }
+
+  function frame() {
+    var w = viewW(), h = viewH();
+    ctx.clearRect(0, 0, w, h);
+
+    var byPair = {};
+    state.robots.forEach(function (r) { (byPair[r.pair] = byPair[r.pair] || []).push(r); });
+
+    state.robots.forEach(function (r) {
+      if (state.phase === 'super') stepSuperposition(r, w, h);
+      else if (state.phase === 'entangled') {
+        var p = byPair[r.pair];
+        var partner = p && p.length === 2 ? (p[0] === r ? p[1] : p[0]) : null;
+        if (partner) stepBoidsPair(r, partner, w, h);
+        else stepSuperposition(r, w, h);
+      } else if (state.phase === 'measured') stepMeasured(r);
+
+      if (state.phase !== 'idle') {
+        r.trail.push({ x: r.x, y: r.y });
+        if (r.trail.length > 26) r.trail.shift();
+      }
+    });
+
+    drawPairLinks();
+    state.robots.forEach(drawRobot);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- explanation copy (spec 5.1) ----------
+  var COPY = {
+    beginner: {
+      h: "Think of a coin spinning in the air. While it's spinning, it's neither heads nor tails — it's both at once. That's superposition. The robots are doing the same thing right now. Press Space to 'catch' the coin and see which way it lands.",
+      x: "The X gate is a flip. Whatever the robot was pointing at, it now points the opposite way — like turning a switch from off to on.",
+      id: "The Identity gate does nothing at all. It's the 'leave it alone' instruction. The robots stay where they started, which is useful for seeing what noise alone does.",
+      sx: "This is half of a flip. Instead of going all the way from off to on, the robot stops halfway — caught in between, still undecided.",
+      y: "The Y gate flips the robot too, but it also twists it along the way. The end result looks like the X gate, but the path there is different.",
+      z: "The Z gate is a hidden change. If you only look at where the robot points, nothing happened — the change is invisible until you combine it with other gates.",
+      entangled: "These robots are connected like twins who always wear matching outfits, no matter how far apart they are. Watch what happens when you change one."
+    },
+    intermediate: {
+      h: "The Hadamard gate puts the qubit into an equal superposition of |0⟩ and |1⟩ — P(|1⟩) = 0.5. Each robot's wandering represents this undefined state. Measurement forces a definite outcome.",
+      x: "The Pauli-X gate is the quantum NOT: it maps |0⟩ to |1⟩ and |1⟩ to |0⟩. Ideally P(|1⟩) = 1.0, so every robot should settle at 180°.",
+      id: "The Identity gate leaves the state untouched, so P(|1⟩) = 0.0. Any deviation you see on screen is caused entirely by the noise model, not by the gate.",
+      sx: "The √X gate is the square root of a bit flip — applying it twice equals one X gate. A single application gives P(|1⟩) = 0.5, an equal superposition.",
+      y: "The Pauli-Y gate rotates the qubit around the Y-axis of the Bloch sphere, taking |0⟩ to i|1⟩. The measured probability is P(|1⟩) = 1.0, matching X in outcome but differing in phase.",
+      z: "The Pauli-Z gate is a phase flip: it leaves |0⟩ alone and sends |1⟩ to −|1⟩. Because measurement discards phase, P(|1⟩) = 0.0 and the robots stay at 0°.",
+      entangled: "The pair is prepared in a Bell state via H on qubit 0 followed by CNOT. Measuring one qubit determines the other, so outcomes are correlated: |00⟩ or |11⟩."
+    },
+    advanced: {
+      h: "H = (1/√2)[[1,1],[1,-1]]. Applied to |0⟩, produces (|0⟩ + |1⟩)/√2. Depolarizing noise at rate ε maps ρ → (1-ε)ρ + (ε/3)(XρX + YρY + ZρZ). The servo angle maps P(|1⟩) × 180°, consistent with Nallakukkala (2026).",
+      x: "X = [[0,1],[1,0]]. X|0⟩ = |1⟩, giving P(|1⟩) = 1. Under depolarizing noise the measured probability decays toward the maximally mixed value of 0.5 as ε → 1.",
+      id: "I = [[1,0],[0,1]]. The state is unchanged, so P(|1⟩) = 0 in the noiseless limit. With depolarizing error applied to the identity and measurement channels, P(|1⟩) → ε/2.",
+      sx: "√X = (1/2)[[1+i,1−i],[1−i,1+i]], satisfying (√X)² = X. Acting on |0⟩ gives (|0⟩ + i|1⟩)·(1/√2) up to global phase, so P(|1⟩) = 0.5.",
+      y: "Y = [[0,−i],[i,0]]. Y|0⟩ = i|1⟩, so P(|1⟩) = 1 — identical measurement statistics to X in the computational basis, differing only by phase, which measurement discards.",
+      z: "Z = [[1,0],[0,−1]]. Z|0⟩ = |0⟩, so P(|1⟩) = 0. Z acts nontrivially only on superpositions, where it introduces a relative phase invisible to a computational-basis measurement.",
+      entangled: "The pair is prepared as |Φ⁺⟩ = (|00⟩ + |11⟩)/√2 via H⊗I followed by CNOT. Depolarizing noise at rate ε on both the single-qubit and two-qubit channels degrades the correlation; observed agreement falls from 1.0 toward chance as ε increases."
+    }
+  };
+
+  function currentExplanation() {
+    var set = COPY[state.level];
+    if (state.mode === 'entanglement') return set.entangled;
+    return set[state.gate] || set.h;
+  }
+
+  function setStatus(text) { statusLabel.textContent = text; }
+
+  function refreshExplanation() {
+    explanationText.textContent = currentExplanation();
+  }
+
+  function updateModeIndicator() {
+    var map = {
+      idle: 'Idle',
+      super: 'Superposition',
+      entangled: 'Entangled',
+      measured: 'Measured'
+    };
+    modeIndicator.textContent = map[state.phase] || 'Idle';
+  }
+
+  // ---------- data panel ----------
+  function setData(o) {
+    if ('gate' in o) $('dGate').textContent = o.gate.toUpperCase();
+    if ('prob' in o) $('dProb').textContent = o.prob === null ? '—' : o.prob.toFixed(3);
+    if ('angle' in o) $('dAngle').textContent = o.angle === null ? '—' : o.angle + '°';
+    if ('ideal' in o) $('dIdeal').textContent = o.ideal === null ? '—' : o.ideal + '°';
+    if ('error' in o) $('dError').textContent = o.error === null ? '—' : o.error + '°';
+    if ('noise' in o) $('dNoise').textContent = o.noise.toFixed(2);
+    if ('fidelity' in o) {
+      var f = o.fidelity;
+      $('dFid').textContent = f === null ? '—' : f.toFixed(3);
+      var fill = $('fidelityFill');
+      fill.style.width = f === null ? '0%' : Math.round(f * 100) + '%';
+      fill.style.background = f === null ? '#4ade80' : (f > 0.85 ? '#4ade80' : f > 0.6 ? '#ffc65c' : '#ff6b5e');
+    }
+  }
+
+  // ---------- websocket ----------
+  var ws = null;
+
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var host = location.host || 'localhost:8000';
+    ws = new WebSocket(proto + '//' + host + '/ws');
+
+    ws.onopen = function () {
+      connDot.classList.add('on');
+      connText.textContent = 'connected';
+      setControlsEnabled(true);
+    };
+
+    ws.onclose = function () {
+      connDot.classList.remove('on');
+      connText.textContent = 'disconnected — retrying';
+      setControlsEnabled(false);
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = function () { /* onclose handles recovery */ };
+
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      handleMessage(msg);
+    };
+  }
+
+  function send(obj) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    obj.knowledge_level = state.level;
+    ws.send(JSON.stringify(obj));
+  }
+
+  function setControlsEnabled(on) {
+    btnSimulate.disabled = !on;
+    btnMeasure.disabled = !on || state.phase === 'idle';
+    btnReset.disabled = !on;
+  }
+
+  function handleMessage(msg) {
+    if (msg.type === 'superposition_state') {
+      state.phase = 'super';
+      state.gate = msg.gate;
+      state.noise = msg.noise_rate;
+      if (state.robots.length !== msg.robots.length) rebuildRobots();
+      msg.robots.forEach(function (rd, i) {
+        var r = state.robots[i];
+        if (!r) return;
+        r.prob = rd.prob;
+        r.angleDeg = rd.angle;
+        r.ghostDeg = null;
+        r.targetHeading = null;
+        r.errorDeg = null;
+      });
+      setStatus('Robots are in superposition — state undefined.');
+      setData({ gate: msg.gate, prob: null, angle: null, ideal: msg.ideal_angle,
+                error: null, noise: msg.noise_rate, fidelity: null });
+      refreshExplanation();
+      updateModeIndicator();
+      setControlsEnabled(true);
+
+    } else if (msg.type === 'measurement_result') {
+      state.phase = 'measured';
+      state.fidelity = msg.fidelity;
+      var ideal = IDEAL[state.gate].angle;
+      var sumP = 0, sumA = 0, sumE = 0, n = msg.robots.length;
+
+      msg.robots.forEach(function (rd, i) {
+        var r = state.robots[i];
+        if (!r) return;
+        r.prob = rd.prob;
+        r.angleDeg = rd.angle;
+        r.errorDeg = rd.error;
+        r.ghostDeg = ideal;
+        r.targetHeading = (rd.angle - 90) * Math.PI / 180;
+        sumP += rd.prob; sumA += rd.angle; sumE += rd.error;
+      });
+
+      setStatus(msg.fidelity >= 0.8
+        ? 'Measurement complete. Fidelity: ' + msg.fidelity.toFixed(3)
+        : 'High decoherence detected. Results unreliable.');
+
+      setData({
+        gate: state.gate,
+        prob: n ? sumP / n : null,
+        angle: n ? Math.round(sumA / n) : null,
+        ideal: ideal,
+        error: n ? Math.round(sumE / n) : null,
+        noise: state.noise,
+        fidelity: msg.fidelity
+      });
+      updateModeIndicator();
+
+    } else if (msg.type === 'entanglement_state') {
+      state.phase = 'entangled';
+      state.noise = msg.noise_rate;
+      state.pairs = msg.pairs;
+      if (!state.robots.length) rebuildRobots();
+
+      msg.pairs.forEach(function (p) {
+        var a = state.robots[p.a.id], b = state.robots[p.b.id];
+        if (a) { a.angleDeg = p.a.angle; a.targetHeading = (p.a.angle - 90) * Math.PI / 180; a.errorDeg = null; a.ghostDeg = null; }
+        if (b) { b.angleDeg = p.b.angle; b.targetHeading = (p.b.angle - 90) * Math.PI / 180; b.errorDeg = null; b.ghostDeg = null; }
+      });
+
+      var broken = msg.pairs.filter(function (p) { return !p.correlated; }).length;
+      setStatus(broken > 0
+        ? 'Decoherence is breaking entanglement.'
+        : 'Robots entangled. Observe correlated behavior.');
+
+      setData({ gate: 'h', prob: null, angle: null, ideal: null, error: null,
+                noise: msg.noise_rate, fidelity: null });
+      refreshExplanation();
+      updateModeIndicator();
+      setControlsEnabled(true);
+
+    } else if (msg.type === 'error') {
+      setStatus('Error: ' + msg.message);
+    }
+  }
+
+  // ---------- actions ----------
+  function doSimulate() {
+    if (state.mode === 'entanglement') {
+      setStatus('Entangling pairs…');
+      send({ type: 'entangle', noise_rate: state.noise, num_robots: state.count });
+    } else {
+      setStatus('Running circuit…');
+      send({ type: 'simulate', gate: state.gate, noise_rate: state.noise, num_robots: state.count });
+    }
+  }
+
+  function doMeasure() {
+    if (state.phase === 'idle') return;
+    setStatus('Collapsing wavefunction…');
+    send({ type: 'measure' });
+  }
+
+  function doReset() {
+    state.phase = 'idle';
+    state.fidelity = null;
+    rebuildRobots();
+    setStatus('Select a gate and press S or Simulate to begin.');
+    setData({ gate: state.gate, prob: null, angle: null, ideal: IDEAL[state.gate].angle,
+              error: null, noise: state.noise, fidelity: null });
+    updateModeIndicator();
+    setControlsEnabled(ws && ws.readyState === WebSocket.OPEN);
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    modeSuper.classList.toggle('active', mode === 'superposition');
+    modeEnt.classList.toggle('active', mode === 'entanglement');
+    doReset();
+    refreshExplanation();
+  }
+
+  function setCount(n) {
+    n = Math.max(MIN_ROBOTS, Math.min(MAX_ROBOTS, n | 0));
+    state.count = n;
+    countInput.value = n;
+    countRange.value = n;
+    robotWarn.style.display = n >= WARN_ROBOTS ? 'block' : 'none';
+    rebuildRobots();
+    if (state.phase !== 'idle') doReset();
+  }
+
+  function setNoise(v) {
+    state.noise = Math.max(0, Math.min(1, v));
+    noiseInput.value = state.noise;
+    noiseVal.textContent = state.noise.toFixed(2);
+    setData({ noise: state.noise });
+    send({ type: 'set_noise', noise_rate: state.noise });
+  }
+
+  // ---------- events ----------
+  gateSel.addEventListener('change', function () {
+    state.gate = gateSel.value;
+    setData({ gate: state.gate, ideal: IDEAL[state.gate].angle });
+    refreshExplanation();
+  });
+
+  countInput.addEventListener('change', function () { setCount(parseInt(countInput.value, 10)); });
+  countRange.addEventListener('input', function () { setCount(parseInt(countRange.value, 10)); });
+  noiseInput.addEventListener('input', function () { setNoise(parseFloat(noiseInput.value)); });
+
+  btnSimulate.addEventListener('click', doSimulate);
+  btnMeasure.addEventListener('click', doMeasure);
+  btnReset.addEventListener('click', doReset);
+  modeSuper.addEventListener('click', function () { setMode('superposition'); });
+  modeEnt.addEventListener('click', function () { setMode('entanglement'); });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.level-toggle button'), function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.level-toggle button'), function (x) {
+        x.classList.remove('active');
+      });
+      b.classList.add('active');
+      state.level = b.getAttribute('data-level');
+      refreshExplanation();
+    });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+
+    if (e.code === 'Space') { e.preventDefault(); doMeasure(); return; }
+
+    var k = e.key.toLowerCase();
+    if (k === 's') { doSimulate(); }
+    else if (k === 'r') { doReset(); }
+    else if (k === 'e') { setMode(state.mode === 'entanglement' ? 'superposition' : 'entanglement'); }
+    else if (k >= '1' && k <= '6') {
+      state.gate = GATE_KEYS[parseInt(k, 10) - 1];
+      gateSel.value = state.gate;
+      setData({ gate: state.gate, ideal: IDEAL[state.gate].angle });
+      refreshExplanation();
+    }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setNoise(state.noise + 0.05); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setNoise(state.noise - 0.05); }
+    else if (e.key === '+' || e.key === '=') { setCount(state.count + 1); }
+    else if (e.key === '-' || e.key === '_') { setCount(state.count - 1); }
+  });
+
+  // ---------- boot ----------
+  resize();
+  setCount(4);
+  setNoise(0.1);
+  refreshExplanation();
+  updateModeIndicator();
+  setData({ gate: 'h', ideal: IDEAL.h.angle });
+  setControlsEnabled(false);
+  connect();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
