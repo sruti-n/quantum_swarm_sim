@@ -71,16 +71,77 @@
     padding: 16px 20px;
   }
 
+  .main { align-items: start; }
+
+  /* Own height (not stretched to the controls panel) so opening Robot Design
+     doesn't resize the simulation; sticky so it stays in view while editing. */
   .canvas-wrap {
-    position: relative;
+    position: sticky;
+    top: 16px;
     background: #02040a;
     border: 1px solid var(--line);
     border-radius: 10px;
     overflow: hidden;
-    min-height: 420px;
+    height: clamp(420px, 62vh, 680px);
   }
 
-  canvas { display: block; width: 100%; height: 100%; }
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  details.design { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.design summary {
+    cursor: pointer;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  details.design[open] summary { margin-bottom: 10px; }
+
+  .design textarea {
+    display: block;
+    width: 100%;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.45;
+    resize: vertical;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 2;
+  }
+  .design textarea:focus, select:focus-visible, input:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .design .fields { font-size: 11px; color: var(--muted); margin: 6px 0 8px; line-height: 1.45; }
+  .design .fields code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #c7d1e8; }
+
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); cursor: pointer; margin-bottom: 10px; }
+  .switch input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+
+  .adv-warn {
+    font-size: 11px;
+    color: var(--gold);
+    border: 1px solid rgba(255,198,92,.35);
+    background: rgba(255,198,92,.07);
+    border-radius: 6px;
+    padding: 5px 8px;
+    margin-bottom: 8px;
+  }
+
+  .shape-msg { font-size: 11.5px; margin-top: 8px; line-height: 1.4; min-height: 1em; overflow-wrap: anywhere; }
+  .shape-msg.err { color: var(--red); }
+  .shape-msg.ok { color: var(--green); }
+
+  @media (max-width: 860px) {
+    .canvas-wrap { position: relative; top: auto; height: 420px; }
+  }
 
   .panel {
     background: var(--panel);
@@ -378,6 +439,40 @@
         <button id="btnReset">Reset <span class="hint">R</span></button>
       </div>
     </div>
+
+    <details class="design" id="designPanel">
+      <summary>Robot Design</summary>
+
+      <label class="switch">
+        <input type="checkbox" id="advToggle"> Advanced: Custom Draw Code
+      </label>
+
+      <div id="simpleDesign">
+        <textarea id="shapeJson" rows="8" spellcheck="false" aria-label="Robot shape config (JSON)"></textarea>
+        <div class="fields">
+          <code>body</code>: "oval", "rect", "diamond" or "arrow" ·
+          <code>width</code>: 10–40 · <code>height</code>: 10–30 ·
+          <code>color</code>: null for state colors, or a hex like "#ff6600" ·
+          <code>sensors</code>, <code>trail</code>: true or false
+        </div>
+        <div class="row">
+          <button id="btnApplyShape" class="primary">Apply Shape</button>
+        </div>
+      </div>
+
+      <div id="advancedDesign" hidden>
+        <div class="adv-warn">Advanced mode — JavaScript knowledge required</div>
+        <textarea id="shapeCode" rows="16" spellcheck="false" aria-label="Custom drawRobot function"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="btnApplyCode" class="primary">Apply Code</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="btnResetShape">Reset to Default</button>
+      </div>
+      <div class="shape-msg" id="shapeMsg" role="status" aria-live="polite"></div>
+    </details>
   </div>
 </div>
 
@@ -470,6 +565,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
 
   function viewW() { return canvas.width / dpr; }
   function viewH() { return canvas.height / dpr; }
@@ -515,67 +611,153 @@
     return '#4da3ff';
   }
 
-  // ---------- vehicle shape ----------
-  // Braitenberg-style vehicle drawn in local space with the front facing +x:
-  // 24px long (rear x = -12, front x = +12) by 16px across at scale 1.
-  var VEHICLE_HALF_LEN = 12, VEHICLE_HALF_WID = 8;
+  // ---------- robot shape ----------
+  // Shapes are drawn in local space with the front facing +x. The default is a
+  // Braitenberg-style vehicle, 24px long by 16px across at scale 1. The Robot
+  // Design panel can swap in a JSON-configured shape or a custom draw function.
+  var GHOST_COLOR = '#c9d3ea', GHOST_ALPHA = 0.2;
+  var CUSTOM_SIZE = 20;   // base size unit passed to custom draw code
+  var SHAPE_BODIES = ['oval', 'rect', 'diamond', 'arrow'];
+  var DEFAULT_SHAPE_CONFIG = { body: 'oval', width: 24, height: 16, color: null, sensors: true, trail: true };
+
+  // kind: 'vehicle' (built-in default) | 'config' (Level 1 JSON) | 'custom' (Level 2 code)
+  var shape = { kind: 'vehicle', config: null, draw: null };
 
   // Full size up to 8 robots, easing down to 75% at the 20-robot cap.
   function vehicleScale() {
     return state.count <= 8 ? 1 : Math.max(0.75, 1 - (state.count - 8) * 0.021);
   }
 
-  function vehicleBodyPath() {
-    var L = VEHICLE_HALF_LEN, W = VEHICLE_HALF_WID, c = 2.5;  // c: front corner radius
-    ctx.beginPath();
-    ctx.moveTo(-4, -W);
+  function vehicleBodyPath(L, W) {
+    var c = Math.min(2.5, W * 0.32), shoulder = L / 3;   // c: front corner radius
+    ctx.moveTo(-shoulder, -W);
     ctx.lineTo(L - c, -W);
     ctx.quadraticCurveTo(L, -W, L, -W + c);
     ctx.lineTo(L, W - c);                                     // flat front edge
     ctx.quadraticCurveTo(L, W, L - c, W);
-    ctx.lineTo(-4, W);
-    ctx.bezierCurveTo(-L - 3, W, -L - 3, -W, -4, -W);         // rounded rear, apex at x ≈ -12
+    ctx.lineTo(-shoulder, W);
+    ctx.bezierCurveTo(-L - L / 4, W, -L - L / 4, -W, -shoulder, -W);   // rounded rear, apex at x ≈ -L
     ctx.closePath();
   }
 
-  function drawVehicle(x, y, heading, fill, alpha) {
-    var s = vehicleScale();
+  // Body outline plus where the two sensor dots sit (x, ±y) for each shape.
+  function bodyGeometry(body, L, W) {
+    ctx.beginPath();
+    if (body === 'oval') {
+      ctx.ellipse(0, 0, L, W, 0, 0, Math.PI * 2);
+      return { sx: L * 0.6, sy: W * 0.45 };
+    }
+    if (body === 'rect') {
+      var c = Math.min(2.5, W * 0.3);
+      ctx.moveTo(-L + c, -W);
+      ctx.arcTo(L, -W, L, W, c);
+      ctx.arcTo(L, W, -L, W, c);
+      ctx.arcTo(-L, W, -L, -W, c);
+      ctx.arcTo(-L, -W, L, -W, c);
+      ctx.closePath();
+      return { sx: L - 2, sy: W * 0.56 };
+    }
+    if (body === 'diamond') {
+      ctx.moveTo(L, 0); ctx.lineTo(0, W); ctx.lineTo(-L, 0); ctx.lineTo(0, -W);
+      ctx.closePath();
+      return { sx: L * 0.42, sy: W * 0.3 };
+    }
+    if (body === 'arrow') {
+      ctx.moveTo(L, 0); ctx.lineTo(-L, W); ctx.lineTo(-L * 0.45, 0); ctx.lineTo(-L, -W);
+      ctx.closePath();
+      return { sx: L * 0.25, sy: W * 0.2 };
+    }
+    vehicleBodyPath(L, W);
+    return { sx: L - 1.5, sy: W * 0.56 };
+  }
+
+  function drawBuiltInShape(x, y, heading, fill, alpha, body, width, height, sensors) {
+    var s = vehicleScale(), L = width / 2, W = height / 2;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(x, y);
     ctx.rotate(heading);
     ctx.scale(s, s);
 
-    vehicleBodyPath();
+    var g = bodyGeometry(body, L, W);
     ctx.fillStyle = fill;
     ctx.fill();
     ctx.lineWidth = 1 / s;
     ctx.strokeStyle = 'rgba(2,4,10,0.55)';
     ctx.stroke();
 
-    // sensor "eyes" on the front edge, one each side
-    [-4.5, 4.5].forEach(function (sy) {
-      ctx.beginPath();
-      ctx.arc(VEHICLE_HALF_LEN - 1.5, sy, 2.1, 0, Math.PI * 2);
-      ctx.fillStyle = '#f4f7ff';
-      ctx.fill();
-      ctx.lineWidth = 1 / s;
-      ctx.strokeStyle = 'rgba(2,4,10,0.7)';
-      ctx.stroke();
-    });
+    // sensor "eyes" at the front, one each side
+    if (sensors) {
+      var rad = Math.max(1.6, Math.min(3.5, W * 0.26));
+      [-g.sy, g.sy].forEach(function (sy) {
+        ctx.beginPath();
+        ctx.arc(g.sx, sy, rad, 0, Math.PI * 2);
+        ctx.fillStyle = '#f4f7ff';
+        ctx.fill();
+        ctx.lineWidth = 1 / s;
+        ctx.strokeStyle = 'rgba(2,4,10,0.7)';
+        ctx.stroke();
+      });
+    }
 
     ctx.restore();
   }
 
+  function resetCtxState() {
+    // User code may leave saves unbalanced or change drawing state; put it back.
+    for (var i = 0; i < 64; i++) ctx.restore();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+  }
+
+  // isGhost: draw the ideal-position outline (neutral color, 20% opacity).
+  function drawShape(x, y, heading, stateColor, isGhost) {
+    var alpha = isGhost ? GHOST_ALPHA : 1;
+    if (shape.kind === 'custom') {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      try {
+        shape.draw(ctx, x, y, heading, isGhost ? GHOST_COLOR : stateColor, CUSTOM_SIZE * vehicleScale());
+      } catch (err) {
+        resetCtxState();
+        customDrawFailed(err);
+        return;
+      }
+      resetCtxState();
+      return;
+    }
+    if (shape.kind === 'config') {
+      var c = shape.config;
+      var fill = isGhost ? GHOST_COLOR : (c.color || stateColor);
+      drawBuiltInShape(x, y, heading, fill, alpha, c.body, c.width, c.height, c.sensors);
+      return;
+    }
+    drawBuiltInShape(x, y, heading, isGhost ? GHOST_COLOR : stateColor, alpha, 'vehicle', 24, 16, true);
+  }
+
+  function shapeHalfLength() {
+    if (shape.kind === 'custom') return CUSTOM_SIZE / 2;
+    if (shape.kind === 'config') return shape.config.width / 2;
+    return 12;
+  }
+
+  function trailEnabled() {
+    return shape.kind !== 'config' || shape.config.trail;
+  }
+
   // Center of the rear edge in world space — where the trail is laid down.
   function vehicleRear(r) {
-    var back = VEHICLE_HALF_LEN * vehicleScale();
+    var back = shapeHalfLength() * vehicleScale();
     return { x: r.x - Math.cos(r.heading) * back, y: r.y - Math.sin(r.heading) * back };
   }
 
   function drawRobot(r) {
     // trail; a jump longer than 40px is a wrap across the canvas edge, so break the line there
-    if (r.trail.length > 1) {
+    if (r.trail.length > 1 && trailEnabled()) {
       ctx.beginPath();
       ctx.moveTo(r.trail[0].x, r.trail[0].y);
       for (var i = 1; i < r.trail.length; i++) {
@@ -590,10 +772,10 @@
 
     // ghost: the same vehicle at 20% opacity, facing where it would with zero noise
     if (r.ghostDeg !== null) {
-      drawVehicle(r.x, r.y, (r.ghostDeg - 90) * Math.PI / 180, '#c9d3ea', 0.2);
+      drawShape(r.x, r.y, (r.ghostDeg - 90) * Math.PI / 180, null, true);
     }
 
-    drawVehicle(r.x, r.y, r.heading, colorFor(r), 1);
+    drawShape(r.x, r.y, r.heading, colorFor(r), false);
   }
 
   function drawPairLinks() {
@@ -1046,6 +1228,126 @@
     setData({ shots: state.shots });
   }
 
+  // ---------- robot design panel ----------
+  var shapeJson = $('shapeJson'), shapeCode = $('shapeCode'), shapeMsg = $('shapeMsg');
+  var advToggle = $('advToggle'), simpleDesign = $('simpleDesign'), advancedDesign = $('advancedDesign');
+
+  var SHAPE_JSON_TEMPLATE = JSON.stringify(DEFAULT_SHAPE_CONFIG, null, 2);
+  var SHAPE_CODE_TEMPLATE = [
+    '// ctx is the HTML5 Canvas 2D context',
+    '// x, y is the robot center position',
+    '// angle is the robot heading in radians',
+    '// color is the current state color string',
+    '// size is the base size unit (default 20)',
+    'function drawRobot(ctx, x, y, angle, color, size) {',
+    '  ctx.save();',
+    '  ctx.translate(x, y);',
+    '  ctx.rotate(angle);',
+    '  // draw your robot here',
+    '  ctx.fillStyle = color;',
+    '  ctx.fillRect(-size/2, -size/3, size, size*0.67);',
+    '  ctx.restore();',
+    '}'
+  ].join('\n');
+
+  function showShapeMsg(text, kind) {
+    shapeMsg.textContent = text;
+    shapeMsg.className = 'shape-msg' + (kind ? ' ' + kind : '');
+  }
+
+  // Returns a clean config, or throws an Error whose message is shown to the user.
+  function parseShapeConfig(text) {
+    var raw;
+    try { raw = JSON.parse(text); }
+    catch (e) { throw new Error('Invalid shape config — check your JSON syntax'); }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Invalid shape config — it must be a { ... } object');
+    }
+
+    var cfg = {}, key;
+    for (key in DEFAULT_SHAPE_CONFIG) cfg[key] = DEFAULT_SHAPE_CONFIG[key];
+    for (key in raw) {
+      if (!(key in DEFAULT_SHAPE_CONFIG)) throw new Error('Invalid shape config — unknown field "' + key + '"');
+      cfg[key] = raw[key];
+    }
+
+    if (SHAPE_BODIES.indexOf(cfg.body) === -1) {
+      throw new Error('Invalid shape config — "body" must be "oval", "rect", "diamond" or "arrow"');
+    }
+    if (typeof cfg.width !== 'number' || !(cfg.width >= 10 && cfg.width <= 40)) {
+      throw new Error('Invalid shape config — "width" must be a number from 10 to 40');
+    }
+    if (typeof cfg.height !== 'number' || !(cfg.height >= 10 && cfg.height <= 30)) {
+      throw new Error('Invalid shape config — "height" must be a number from 10 to 30');
+    }
+    if (cfg.color !== null && !(typeof cfg.color === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(cfg.color))) {
+      throw new Error('Invalid shape config — "color" must be null or a hex color like "#ff6600"');
+    }
+    if (typeof cfg.sensors !== 'boolean') throw new Error('Invalid shape config — "sensors" must be true or false');
+    if (typeof cfg.trail !== 'boolean') throw new Error('Invalid shape config — "trail" must be true or false');
+    return cfg;
+  }
+
+  function applyShapeConfig() {
+    try {
+      shape = { kind: 'config', config: parseShapeConfig(shapeJson.value), draw: null };
+      showShapeMsg('Shape applied to all robots.', 'ok');
+    } catch (err) {
+      showShapeMsg(err.message, 'err');   // keep the current shape
+    }
+  }
+
+  function describeError(err) {
+    return err && err.name && err.message ? err.name + ': ' + err.message : String(err);
+  }
+
+  // Compile the user's code and test-draw it once off-screen before using it,
+  // so most mistakes are reported here instead of mid-animation.
+  function applyCustomCode() {
+    var draw;
+    try {
+      var factory = new Function('"use strict";\n' + shapeCode.value +
+        '\n;return typeof drawRobot === "function" ? drawRobot : undefined;');
+      draw = factory();
+      if (typeof draw !== 'function') {
+        throw new Error('Your code must define a function named drawRobot(ctx, x, y, angle, color, size)');
+      }
+      var test = document.createElement('canvas');
+      test.width = test.height = 64;
+      draw(test.getContext('2d'), 32, 32, 0, '#4da3ff', CUSTOM_SIZE);
+    } catch (err) {
+      showShapeMsg('Code error — ' + describeError(err), 'err');   // keep the current shape
+      return;
+    }
+    shape = { kind: 'custom', config: null, draw: draw };
+    showShapeMsg('Custom draw code applied to all robots.', 'ok');
+  }
+
+  // Called from drawShape when custom code throws during the animation.
+  function customDrawFailed(err) {
+    shape = { kind: 'vehicle', config: null, draw: null };
+    showShapeMsg('Your drawRobot code threw an error while drawing — ' + describeError(err) +
+      '. Showing the default shape until you apply working code.', 'err');
+  }
+
+  function resetShape() {
+    shape = { kind: 'vehicle', config: null, draw: null };
+    shapeJson.value = SHAPE_JSON_TEMPLATE;
+    shapeCode.value = SHAPE_CODE_TEMPLATE;
+    showShapeMsg('Default vehicle shape restored.', 'ok');
+  }
+
+  advToggle.addEventListener('change', function () {
+    simpleDesign.hidden = advToggle.checked;
+    advancedDesign.hidden = !advToggle.checked;
+    showShapeMsg('', '');
+  });
+  $('btnApplyShape').addEventListener('click', applyShapeConfig);
+  $('btnApplyCode').addEventListener('click', applyCustomCode);
+  $('btnResetShape').addEventListener('click', resetShape);
+  shapeJson.value = SHAPE_JSON_TEMPLATE;
+  shapeCode.value = SHAPE_CODE_TEMPLATE;
+
   // ---------- events ----------
   gateSel.addEventListener('change', function () {
     state.gate = gateSel.value;
@@ -1078,6 +1380,8 @@
   function isTextEntry(el) {
     var tag = (el.tagName || '').toLowerCase();
     if (tag === 'textarea' || el.isContentEditable) return true;
+    // Space is the only key that toggles a checkbox, so leave it alone there too
+    if (tag === 'input' && el.type === 'checkbox') return true;
     return tag === 'input' && ['text', 'search', 'email', 'password', 'url'].indexOf(el.type) !== -1;
   }
 

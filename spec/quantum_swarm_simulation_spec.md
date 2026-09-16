@@ -307,13 +307,105 @@ corresponding controls in the UI.
 
 Space works wherever keyboard focus is, including on the gate dropdown,
 sliders, robot count box, and buttons, and is only ignored while typing in a
-text field. It never scrolls the page, opens the dropdown, or activates a
-focused button, and holding it down triggers a single measurement. The other
-shortcuts are ignored while a dropdown or input has focus, so those controls
-keep their normal keyboard behavior.
+text field or on a checkbox. It never scrolls the page, opens the dropdown, or
+activates a focused button, and holding it down triggers a single measurement.
+The other shortcuts are ignored while a dropdown, input, or text area has
+focus, so those controls keep their normal keyboard behavior.
 
 **Robot count cap:** Maximum 20 robots. Above this, performance on
 a standard laptop degrades noticeably. A warning appears at 15+.
+
+### 4.5 Robot Design (Custom Shape Loader)
+
+A collapsible "Robot Design" section at the bottom of the controls panel lets
+users replace the robot shape. It is closed by default. The canvas has its own
+height, so opening the section does not resize the simulation, and on wide
+screens the canvas stays in view while the panel scrolls. The shape is purely
+visual: WebSocket messages, quantum logic, and data logging are unaffected.
+
+It works at two levels.
+
+**Level 1 — JSON config (for non-coders)**
+
+A text area pre-filled with:
+
+```json
+{
+  "body": "oval",
+  "width": 24,
+  "height": 16,
+  "color": null,
+  "sensors": true,
+  "trail": true
+}
+```
+
+| Field | Allowed values | Effect |
+|-------|----------------|--------|
+| body | "oval", "rect", "diamond", "arrow" | Body outline; the front always faces the heading |
+| width | number, 10–40 | Length along the heading, in px at default robot count |
+| height | number, 10–30 | Width across the heading, in px at default robot count |
+| color | null, or a hex color such as "#ff6600" | null keeps the state color coding (Section 4.2); a hex color overrides it for every state |
+| sensors | true / false | Show the two sensor dots at the front |
+| trail | true / false | Show the trail |
+
+- **Apply Shape** validates the text and immediately redraws every robot and
+  ghost. Fields left out take the values above.
+- Text that is not valid JSON (including single-quoted keys) shows:
+  "Invalid shape config — check your JSON syntax"
+- Valid JSON with a bad value shows a specific message in the same style,
+  for example: "Invalid shape config — "width" must be a number from 10 to 40",
+  "Invalid shape config — unknown field "colour"", or
+  "Invalid shape config — it must be a { ... } object"
+- On any error the current shape is kept and the simulation keeps running.
+
+**Level 2 — Custom draw code (for coders)**
+
+Turning on the "Advanced: Custom Draw Code" checkbox replaces the JSON text
+area with a larger code text area, under the warning
+"Advanced mode — JavaScript knowledge required". It is pre-filled with:
+
+```js
+// ctx is the HTML5 Canvas 2D context
+// x, y is the robot center position
+// angle is the robot heading in radians
+// color is the current state color string
+// size is the base size unit (default 20)
+function drawRobot(ctx, x, y, angle, color, size) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  // draw your robot here
+  ctx.fillStyle = color;
+  ctx.fillRect(-size/2, -size/3, size, size*0.67);
+  ctx.restore();
+}
+```
+
+- **Apply Code** compiles the code, requires a function named `drawRobot`,
+  and test-draws it once on an off-screen canvas before using it.
+- A syntax error, a missing `drawRobot`, or an error during the test draw is
+  shown inline ("Code error — TypeError: …") and the current shape is kept.
+- If the function throws later while animating, the simulation switches back to
+  the default vehicle and shows the error inline. It never stops the animation.
+- After every call the canvas drawing state is reset, so code that forgets
+  `ctx.restore()` or changes transparency cannot distort the rest of the canvas.
+- `size` follows the robot count scaling (20 at up to 8 robots, down to 15 at 20).
+- The code runs only in the user's own browser tab and is not saved. An
+  infinite loop in the code cannot be caught and will freeze the tab.
+
+**Shared behavior**
+- **Reset to Default** restores the built-in Braitenberg vehicle (Section 4.2)
+  and refills both text areas with their templates. The JSON template's "oval"
+  is a starting point to edit, so applying it unchanged gives an oval, not the
+  default vehicle.
+- Ghost outlines use the same custom shape, drawn in a neutral gray at 20%
+  opacity (a JSON `color` override does not tint ghosts). Custom code receives
+  that gray as `color` with transparency already set to 20%.
+- The trail starts at the center of the rear edge: half of `width` behind
+  the center for JSON shapes, and `size / 2` behind it for custom code.
+- The shape stays in effect across Simulate, Measure, Reset, and mode changes,
+  and resets on page reload.
 
 ---
 
@@ -739,6 +831,9 @@ Changes made after the original build (Prompts 1–5), newest first.
 
 | Commit | Change |
 |--------|--------|
+| feat: add two-tier custom robot shape loader | Robot Design section (Section 4.5): Level 1 JSON shape config (oval, rect, diamond, arrow; size, color override, sensors, trail) and Level 2 custom `drawRobot` code, both applied to robots and ghosts with inline errors. Canvas given its own sticky height so the panel can grow |
+| 5e681f5 | Measure in Entanglement mode now measures each pair with the Bell state circuit, so partners collapse together; error is against the partner's outcome and fidelity is the fraction of pairs that stayed correlated. Bell rows are logged with gate `bell` |
+| 75aeaab | Spec brought up to date with all changes below |
 | dddd208 | Robots redesigned as Braitenberg-style vehicles with a flat front, two sensor dots, and a rounded rear; the needle was removed. The ghost uses the same shape at 20% opacity and the trail follows the rear edge. Vehicles face their direction of travel, and entangled pairs use velocity alignment. Minimum robot count lowered from 4 to 1, with at least 2 required in Entanglement mode |
 | a6d4935, 934d64e | Shots slider (1–4096, default 256) with `[` / `]` shortcuts and a Shots explanation at all three knowledge levels. Backend accepts `shots` on simulate and measure and echoes it back. CSV gains a trailing Shots column; older-format files are archived. Active knowledge-level button no longer loses its label on hover |
 | b76767c | Default shots reduced from 1024 to 256. Loading overlay on the canvas while a circuit runs, with matching "Quantum circuit running..." and "Collapsing wavefunction..." status labels |

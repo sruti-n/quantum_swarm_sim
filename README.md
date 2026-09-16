@@ -46,6 +46,15 @@ on a different port, the WebSocket follows automatically.
 | Add / remove a robot (1–20; Entanglement needs 2+) | `+` / `-` |
 | Halve / double shots (1–4096, default 256) | `[` / `]` |
 
+### Robot Design
+
+Open **Robot Design** at the bottom of the controls panel to change how the
+robots look. Edit the JSON (body `oval` / `rect` / `diamond` / `arrow`, size,
+color, sensor dots, trail) and press **Apply Shape**. If you write JavaScript,
+turn on **Advanced: Custom Draw Code** and write your own
+`drawRobot(ctx, x, y, angle, color, size)` function. **Reset to Default**
+brings back the standard vehicle. See Section 4.5 of the spec for details.
+
 ## Project Structure
 
 ```
