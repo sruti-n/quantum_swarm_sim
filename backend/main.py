@@ -87,7 +87,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if message_type == "simulate":
                     await handle_simulate(websocket, state, message)
                 elif message_type == "measure":
-                    await handle_measure(websocket, state)
+                    await handle_measure(websocket, state, message)
                 elif message_type == "entangle":
                     await handle_entangle(websocket, state, message)
                 elif message_type == "set_noise":
@@ -129,7 +129,17 @@ async def handle_simulate(websocket, state, message):
     })
 
 
-async def handle_measure(websocket, state):
+async def handle_measure(websocket, state, message):
+    # The spec'd message is just {type: "measure"}; the frontend also sends the
+    # simulated context so a reconnect (fresh SessionState) still measures the
+    # circuit the robots are showing.
+    if "gate" in message:
+        state.gate = validate_gate(message["gate"])
+    if "noise_rate" in message:
+        state.noise_rate = clamp_noise(message["noise_rate"])
+    if "num_robots" in message:
+        state.num_robots = clamp_robots(message["num_robots"])
+
     robots = []
     fidelities = []
 
@@ -166,6 +176,7 @@ async def handle_measure(websocket, state):
         "type": "measurement_result",
         "robots": robots,
         "fidelity": swarm_fidelity,
+        "gate": state.gate,
     })
 
 

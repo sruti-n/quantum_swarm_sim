@@ -368,6 +368,8 @@
     noise: 0.1,
     count: 4,
     level: 'beginner',
+    simGate: 'h',                // gate the robots were actually simulated with
+    measuring: false,            // a measure request is in flight
     fidelity: null,
     robots: [],
     pairs: []
@@ -674,6 +676,7 @@
     ws.onclose = function () {
       connDot.classList.remove('on');
       connText.textContent = 'disconnected — retrying';
+      state.measuring = false;
       setControlsEnabled(false);
       setTimeout(connect, 2000);
     };
@@ -695,7 +698,8 @@
 
   function setControlsEnabled(on) {
     btnSimulate.disabled = !on;
-    btnMeasure.disabled = !on || state.phase === 'idle';
+    // Measure stays clickable while idle so it can tell the user to simulate first
+    btnMeasure.disabled = !on;
     btnReset.disabled = !on;
   }
 
@@ -703,6 +707,7 @@
     if (msg.type === 'superposition_state') {
       state.phase = 'super';
       state.gate = msg.gate;
+      state.simGate = msg.gate;
       state.noise = msg.noise_rate;
       if (state.robots.length !== msg.robots.length) rebuildRobots();
       msg.robots.forEach(function (rd, i) {
@@ -722,9 +727,12 @@
       setControlsEnabled(true);
 
     } else if (msg.type === 'measurement_result') {
+      state.measuring = false;
+      if (state.phase === 'idle') return;   // reset while the measurement was in flight
       state.phase = 'measured';
       state.fidelity = msg.fidelity;
-      var ideal = IDEAL[state.gate].angle;
+      var measuredGate = msg.gate || state.simGate;
+      var ideal = IDEAL[measuredGate].angle;
       var sumP = 0, sumA = 0, sumE = 0, n = msg.robots.length;
 
       msg.robots.forEach(function (rd, i) {
@@ -743,7 +751,7 @@
         : 'High decoherence detected. Results unreliable.');
 
       setData({
-        gate: state.gate,
+        gate: measuredGate,
         prob: n ? sumP / n : null,
         angle: n ? Math.round(sumA / n) : null,
         ideal: ideal,
@@ -777,6 +785,7 @@
       setControlsEnabled(true);
 
     } else if (msg.type === 'error') {
+      state.measuring = false;
       setStatus('Error: ' + msg.message);
     }
   }
@@ -793,13 +802,25 @@
   }
 
   function doMeasure() {
-    if (state.phase === 'idle') return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setStatus('Not connected to the backend — cannot measure yet.');
+      return;
+    }
+    if (state.phase === 'idle') {
+      setStatus('Nothing to measure yet — press S or Simulate first.');
+      return;
+    }
+    if (state.measuring) return;   // ignore repeat clicks while a measurement runs
+    state.measuring = true;
     setStatus('Collapsing wavefunction…');
-    send({ type: 'measure' });
+    // Send the simulated context so the backend measures the same circuit the
+    // robots are showing, even if its session state was lost on a reconnect.
+    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length });
   }
 
   function doReset() {
     state.phase = 'idle';
+    state.measuring = false;
     state.fidelity = null;
     rebuildRobots();
     setStatus('Select a gate and press S or Simulate to begin.');
@@ -863,11 +884,25 @@
     });
   });
 
+  function isTextEntry(el) {
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'textarea' || el.isContentEditable) return true;
+    return tag === 'input' && ['text', 'search', 'email', 'password', 'url'].indexOf(el.type) !== -1;
+  }
+
+  // Space is global: it must work even while the gate dropdown, a slider,
+  // the robot-count box or a button has focus after the user touched it.
+  function isSpace(e) { return e.code === 'Space' || e.key === ' '; }
+
   document.addEventListener('keydown', function (e) {
+    if (isSpace(e) && !isTextEntry(e.target)) {
+      e.preventDefault();          // stop page scroll / dropdown open / button activation
+      if (!e.repeat) doMeasure();  // holding Space must not flood the backend
+      return;
+    }
+
     var tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-
-    if (e.code === 'Space') { e.preventDefault(); doMeasure(); return; }
 
     var k = e.key.toLowerCase();
     if (k === 's') { doSimulate(); }
@@ -883,6 +918,12 @@
     else if (e.key === 'ArrowDown') { e.preventDefault(); setNoise(state.noise - 0.05); }
     else if (e.key === '+' || e.key === '=') { setCount(state.count + 1); }
     else if (e.key === '-' || e.key === '_') { setCount(state.count - 1); }
+  });
+
+  // Some browsers (Firefox) activate a focused button on Space keyup even when
+  // keydown was prevented, which would re-fire Simulate/Reset over the measurement.
+  document.addEventListener('keyup', function (e) {
+    if (isSpace(e) && !isTextEntry(e.target)) e.preventDefault();
   });
 
   // ---------- boot ----------
