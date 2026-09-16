@@ -22,13 +22,31 @@ to a physical robot prototype.
 
 ## How to Run
 
+This is a locally-run application. The quantum results come from a Python
+backend (FastAPI + Qiskit) that must be running on your own machine, so the
+simulation is not hosted online. You need Python 3 and `pip` installed.
+
+### Option 1: One-click script
+
+From the project root:
+
+```
+./run.sh
+```
+
+The script installs the dependencies from `backend/requirements.txt` and starts
+the server.
+
+### Option 2: Manual terminal setup
+
 ```
 cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-Then open <http://localhost:8000> in a browser.
+With either option, open <http://localhost:8000> in a browser once the server
+has started. Press `Ctrl+C` in the terminal to stop it.
 
 The page connects back to the server it was loaded from, so if you run uvicorn
 on a different port, the WebSocket follows automatically.
