@@ -297,6 +297,16 @@
 
   .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
 
+  .credit {
+    position: fixed;
+    bottom: 10px;
+    left: 12px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    pointer-events: none;
+    z-index: 100;
+  }
+
   #loadingOverlay {
     position: absolute;
     inset: 0;
@@ -865,17 +875,6 @@
     r.x += r.vx; r.y += r.vy;
   }
 
-  // drawn before pair links and robots so it sits above the background but beneath the swarm
-  function drawCredit(h) {
-    ctx.save();
-    ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('Designed by Sruti Nallakukkala, 2026', 8, h - 8);
-    ctx.restore();
-  }
-
   function frame() {
     var w = viewW(), h = viewH();
     ctx.clearRect(0, 0, w, h);
@@ -898,7 +897,6 @@
       }
     });
 
-    drawCredit(h);
     drawPairLinks();
     state.robots.forEach(drawRobot);
     requestAnimationFrame(frame);
@@ -1448,5 +1446,6 @@
   requestAnimationFrame(frame);
 })();
 </script>
+<div class="credit">Designed by Sruti Nallakukkala, 2026</div>
 </body>
 </html>
