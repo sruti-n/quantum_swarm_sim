@@ -858,6 +858,38 @@
     r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
   }
 
+  // Global separation: no two robots share space, in any mode. The push is
+  // deliberately soft — a fraction of the overlap per frame — so crowded robots
+  // ease apart over several frames instead of snapping to a legal position.
+  var SEPARATION_RADIUS = 30;   // px, center to center
+  var SEPARATION_EASE = 0.22;   // fraction of the overlap resolved per frame
+  var SEPARATION_DRIFT = 0.6;   // how much of the push carries into velocity
+
+  function applySeparation(w, h) {
+    var rs = state.robots;
+    for (var i = 0; i < rs.length; i++) {
+      for (var j = i + 1; j < rs.length; j++) {
+        var a = rs[i], b = rs[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var d = Math.hypot(dx, dy);
+        if (d >= SEPARATION_RADIUS) continue;
+        if (d < 0.001) {
+          // exactly coincident: no direction to separate along, so pick one
+          var t = Math.random() * Math.PI * 2;
+          dx = Math.cos(t); dy = Math.sin(t); d = 1;
+        }
+        var ux = dx / d, uy = dy / d;
+        var push = (SEPARATION_RADIUS - d) * SEPARATION_EASE;
+        a.x -= ux * push; a.y -= uy * push;
+        b.x += ux * push; b.y += uy * push;
+        // carrying part of the push into velocity keeps them drifting apart
+        a.vx -= ux * push * SEPARATION_DRIFT; a.vy -= uy * push * SEPARATION_DRIFT;
+        b.vx += ux * push * SEPARATION_DRIFT; b.vy += uy * push * SEPARATION_DRIFT;
+      }
+    }
+    for (var k = 0; k < rs.length; k++) wrap(rs[k], w, h);
+  }
+
   function angleDelta(from, to) {
     var d = (to - from) % (Math.PI * 2);
     if (d > Math.PI) d -= Math.PI * 2;
@@ -888,7 +920,13 @@
         if (partner) stepBoidsPair(r, partner, w, h);
         else stepSuperposition(r, w, h);
       } else if (state.phase === 'measured') stepMeasured(r);
+    });
 
+    // Positions are final for this frame only after separation has resolved, so
+    // it runs before the trail records where each robot ended up.
+    applySeparation(w, h);
+
+    state.robots.forEach(function (r) {
       if (state.phase !== 'idle') {
         r.trail.push(vehicleRear(r));
         if (r.trail.length > 26) r.trail.shift();

@@ -36,7 +36,7 @@ class QuantumEngine:
             'z':  {'prob': 0.0, 'angle': 0}
         }
 
-    def simulate(self, gate_name, total_shots=DEFAULT_SHOTS, error_rate=0.0):
+    def _build_circuit(self, gate_name):
         # Create and draw a quantum circuit with one qubit and one classical bit for measurement
         qc = QuantumCircuit(1, 1)
 
@@ -56,26 +56,59 @@ class QuantumEngine:
             print(f"Unknown gate name: {gate_name}. Defaulting to Hadamard.")
             qc.h(0)  # Apply Hadamard gate to create superposition
 
-        qc.measure(0, 0)  # Measure the qubit
+        return qc
 
+    def _noise_model(self, gate_name, error_rate):
         # Adding noise logic to the simulator
-        noise_model = None
+        if error_rate <= 0.0:
+            return None
 
-        if (error_rate > 0.0):
-            noise_model = NoiseModel()
-            dep_error = depolarizing_error(error_rate, 1)  # Depolarizing error for single qubit gates
-            noise_model.add_all_qubit_quantum_error(dep_error, [gate_name])  # Add the error to the specified gate
-            noise_model.add_all_qubit_quantum_error(dep_error, ['measure'])  # Add the error to measurement
+        noise_model = NoiseModel()
+        dep_error = depolarizing_error(error_rate, 1)  # Depolarizing error for single qubit gates
+        noise_model.add_all_qubit_quantum_error(dep_error, [gate_name])  # Add the error to the specified gate
+        noise_model.add_all_qubit_quantum_error(dep_error, ['measure'])  # Add the error to measurement
+        return noise_model
+
+    def simulate(self, gate_name, total_shots=DEFAULT_SHOTS, error_rate=0.0):
+        """Run the gate over many shots and return P(|1>) — the distribution the
+        superposition display is built from, not a single collapsed outcome."""
+        qc = self._build_circuit(gate_name)
+        qc.measure(0, 0)  # Measure the qubit
 
         # Simulate the circuit using AerSimulator
         simulator = AerSimulator()
-        job = simulator.run(qc, shots=total_shots, noise_model=noise_model)
+        job = simulator.run(qc, shots=total_shots, noise_model=self._noise_model(gate_name, error_rate))
         result = job.result()
         counts = result.get_counts()
 
         num_ones = counts.get('1', 0)
         probability = num_ones / total_shots
         return probability
+
+    def measure_once(self, gate_name, error_rate=0.0):
+        """Collapse the qubit with a single shot and return that one outcome.
+
+        `simulate` averages over many shots to establish the probability
+        distribution; a real measurement draws from that distribution exactly
+        once. So this runs shots=1 and returns the bit that came back: |0> maps
+        to 0 degrees, |1> to 180 degrees. Repeated measurements after an H gate
+        therefore land on 0 or 180 at random, which is the physical behaviour.
+        """
+        qc = self._build_circuit(gate_name)
+        qc.measure(0, 0)
+
+        simulator = AerSimulator()
+        job = simulator.run(qc, shots=1, noise_model=self._noise_model(gate_name, error_rate))
+        counts = job.result().get_counts()
+
+        # A single shot yields exactly one bitstring, either '0' or '1'.
+        bit = int(list(counts.keys())[0].replace(" ", ""))
+
+        return {
+            'bit': bit,
+            'prob': float(bit),
+            'angle': bit * 180,
+        }
 
     def simulate_bell_state(self, noise_rate):
         """Run a 2-qubit Bell state circuit and return one correlated outcome pair.

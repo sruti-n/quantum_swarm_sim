@@ -164,9 +164,13 @@ async def handle_measure(websocket, state, message):
     robots = []
     fidelities = []
 
+    # Measuring collapses the state: each robot draws one random outcome rather
+    # than the averaged probability, so |0> lands on 0 deg and |1> on 180 deg.
+    # Two measurements of the same H circuit can therefore disagree.
     for robot_id in range(state.num_robots):
-        prob = engine.simulate(state.gate, state.shots, state.noise_rate)
-        angle = int(prob * 180)
+        outcome = engine.measure_once(state.gate, state.noise_rate)
+        prob = outcome["prob"]
+        angle = outcome["angle"]
         prob_error, angle_error = engine.calculate_error(state.gate, prob, angle)
         fidelity = engine.calculate_fidelity(prob_error)
         fidelities.append(fidelity)
@@ -189,7 +193,7 @@ async def handle_measure(websocket, state, message):
             mode=state.mode,
             fidelity=fidelity,
             knowledge_level=state.knowledge_level,
-            shots=state.shots,
+            shots=1,
         )
 
     swarm_fidelity = sum(fidelities) / len(fidelities) if fidelities else 0.0
@@ -199,7 +203,7 @@ async def handle_measure(websocket, state, message):
         "robots": robots,
         "fidelity": swarm_fidelity,
         "gate": state.gate,
-        "shots": state.shots,
+        "shots": 1,
         "mode": "superposition",
     })
 
