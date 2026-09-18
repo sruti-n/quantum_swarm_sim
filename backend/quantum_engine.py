@@ -70,7 +70,8 @@ class QuantumEngine:
         return noise_model
 
     def simulate(self, gate_name, total_shots=DEFAULT_SHOTS, error_rate=0.0):
-        """Run the gate over many shots and return P(|1>) — the distribution the
+        """
+        Run the gate over many shots and return P(|1>) — the distribution the
         superposition display is built from, not a single collapsed outcome."""
         qc = self._build_circuit(gate_name)
         qc.measure(0, 0)  # Measure the qubit
@@ -86,7 +87,8 @@ class QuantumEngine:
         return probability
 
     def measure_once(self, gate_name, error_rate=0.0):
-        """Collapse the qubit with a single shot and return that one outcome.
+        """
+        Collapse the qubit with a single shot and return that one outcome.
 
         `simulate` averages over many shots to establish the probability
         distribution; a real measurement draws from that distribution exactly
@@ -111,7 +113,8 @@ class QuantumEngine:
         }
 
     def simulate_bell_state(self, noise_rate):
-        """Run a 2-qubit Bell state circuit and return one correlated outcome pair.
+        """
+        Run a 2-qubit Bell state circuit and return one correlated outcome pair.
 
         H on qubit 0, then CNOT with qubit 0 controlling qubit 1. Because of the
         Bell state the two measured bits are correlated: |00> or |11> in the
