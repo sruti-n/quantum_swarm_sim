@@ -102,8 +102,9 @@ quantum_swarm_sim/
 │   ├── servo_test.ino
 │   ├── sketch_apr20a.ino
 │   └── Quantum Bits, Gates, and Circuits.ipynb
-└── spec/
-    └── quantum_swarm_simulation_spec.md
+├── spec/
+│   └── quantum_swarm_simulation_spec.md
+└── LICENSE                            # MIT License
 ```
 
 ### Data
