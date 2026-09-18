@@ -124,3 +124,7 @@ Shots
 `quantum_swarm_data.csv` has the older header, the backend renames it to
 `quantum_swarm_data_old_format_<timestamp>.csv` and starts a new file rather
 than appending misaligned rows.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
