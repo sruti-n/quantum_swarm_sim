@@ -368,7 +368,7 @@
 <header>
   <div>
     <h1>Bridging the Quantum Gap — Quantum Swarm Simulation</h1>
-    <p class="sub">Sruti Nallakukkala · PRISMS Applied Physics Research Lab · Stage 1</p>
+    <p class="sub">Sruti Nallakukkala · Princeton International School of Mathematics and Science Applied Physics Research Lab · Stage 1: Simulation</p>
   </div>
   <div>
     <span id="connDot"></span><span id="connText" style="font-size:11px;color:var(--muted)">connecting…</span>
@@ -786,25 +786,77 @@
     drawShape(r.x, r.y, r.heading, colorFor(r), false);
   }
 
-  function drawPairLinks() {
-    if (state.phase !== 'entangled') return;
-    var byPair = {};
-    state.robots.forEach(function (r) {
-      (byPair[r.pair] = byPair[r.pair] || []).push(r);
-    });
+  // ---------- entanglement pair links ----------
+  // A dashed line joins the two robots of each Bell pair. The dashes travel along
+  // it every frame, so the link reads as an active correlation rather than a
+  // static tether. Drawn before the robots so it never sits on top of them.
+  var LINK_ALPHA = 0.6;             // base opacity of a connection line
+  var LINK_FLASH_MS = 300;          // white flash when a measurement collapses a pair
+  var LINK_DASH_SPEED = 0.6;        // px of dash travel per frame
+  var LINK_DECOHERE_NOISE = 0.7;    // above this the dashes break into faint dots
+  var LINK_LABEL_OFFSET = 9;        // px the "Pair n" label sits off the line
+  var LINK_FONT = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+
+  var linkDashOffset = 0;   // advanced each frame to animate the flow
+  var linkFlashAt = 0;      // timestamp of the last collapse, 0 when there is none
+
+  // 1 at the instant of measurement, easing to 0 over LINK_FLASH_MS.
+  function linkFlash(now) {
+    if (!linkFlashAt) return 0;
+    var t = (now - linkFlashAt) / LINK_FLASH_MS;
+    return t >= 0 && t < 1 ? 1 - t : 0;
+  }
+
+  // Gold while coherent, sliding toward red as the noise rate climbs.
+  function linkColor() {
+    var t = Math.min(1, state.noise);
+    return { r: 255, g: Math.round(198 + (107 - 198) * t), b: Math.round(92 + (94 - 92) * t) };
+  }
+
+  function drawPairLinks(byPair) {
+    linkDashOffset = (linkDashOffset + LINK_DASH_SPEED) % 1000;
+    if (state.mode !== 'entanglement' || state.phase === 'idle') return;
+
+    var flash = linkFlash(performance.now());
+    var c = linkColor();
+    // past the decoherence threshold the link thins out to faint dots
+    var decohered = state.noise > LINK_DECOHERE_NOISE;
+    var alpha = LINK_ALPHA * (decohered ? 1 - (state.noise - LINK_DECOHERE_NOISE) * 1.2 : 1);
+
+    // the collapse flash washes the line toward opaque white for ~0.3s
+    var r = Math.round(c.r + (255 - c.r) * flash);
+    var g = Math.round(c.g + (255 - c.g) * flash);
+    var b = Math.round(c.b + (255 - c.b) * flash);
+    var a = alpha + (1 - alpha) * flash;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(3) + ')';
+    ctx.lineWidth = 1 + flash * 1.2;
+    ctx.setLineDash(decohered ? [1.5, 7] : [7, 6]);
+    ctx.lineDashOffset = -linkDashOffset;
+    ctx.font = LINK_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
     Object.keys(byPair).forEach(function (k) {
       var p = byPair[k];
       if (p.length < 2) return;
+      var ax = p[0].x, ay = p[0].y, bx = p[1].x, by = p[1].y;
+
       ctx.beginPath();
-      ctx.moveTo(p[0].x, p[0].y);
-      ctx.lineTo(p[1].x, p[1].y);
-      // link fades as noise rises — decoherence breaking entanglement
-      ctx.strokeStyle = 'rgba(255,198,92,' + (0.42 * (1 - state.noise)).toFixed(3) + ')';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 4]);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
       ctx.stroke();
-      ctx.setLineDash([]);
+
+      // "Pair n" at the midpoint, nudged off the line so the dashes miss the text
+      var dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy) || 1;
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.fillText('Pair ' + (parseInt(k, 10) + 1),
+        (ax + bx) / 2 - (dy / d) * LINK_LABEL_OFFSET,
+        (ay + by) / 2 + (dx / d) * LINK_LABEL_OFFSET);
     });
+
+    ctx.restore();
   }
 
   // ---------- physics ----------
@@ -933,7 +985,7 @@
       }
     });
 
-    drawPairLinks();
+    drawPairLinks(byPair);
     state.robots.forEach(drawRobot);
     requestAnimationFrame(frame);
   }
@@ -1121,7 +1173,8 @@
       });
 
       if (bell) {
-        var pairText = msg.pairs_correlated + ' of ' + msg.pairs_total + (msg.pairs_total === 1 ? ' pair' : ' pairs');
+        linkFlashAt = performance.now();   // flash the pair links white as they snap
+        var pairText =msg.pairs_correlated + ' of ' + msg.pairs_total + (msg.pairs_total === 1 ? ' pair' : ' pairs');
         setStatus(msg.fidelity >= 0.8
           ? 'Measurement complete. ' + pairText + ' stayed correlated. Fidelity: ' + msg.fidelity.toFixed(3)
           : 'High decoherence detected. Only ' + pairText + ' stayed correlated.');
@@ -1216,6 +1269,7 @@
     state.phase = 'idle';
     hideLoading();
     state.fidelity = null;
+    linkFlashAt = 0;
     rebuildRobots();
     setStatus('Select a gate and press S or Simulate to begin.');
     setData({ gate: state.gate, prob: null, angle: null, ideal: IDEAL[state.gate].angle,
