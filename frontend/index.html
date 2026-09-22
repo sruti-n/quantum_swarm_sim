@@ -636,15 +636,19 @@
     return state.count <= 8 ? 1 : Math.max(0.75, 1 - (state.count - 8) * 0.021);
   }
 
+  // The rear is two mirrored cubics rather than one. Both leave the flank along
+  // -x, so the shoulder stays tangent-continuous as before, but the curvature now
+  // ramps in over a longer run instead of snapping on at a single point.
   function vehicleBodyPath(L, W) {
-    var c = Math.min(2.5, W * 0.32), shoulder = L / 3;   // c: front corner radius
+    var c = Math.min(2.5, W * 0.32), shoulder = L * 0.15;   // c: front corner radius
     ctx.moveTo(-shoulder, -W);
     ctx.lineTo(L - c, -W);
     ctx.quadraticCurveTo(L, -W, L, -W + c);
     ctx.lineTo(L, W - c);                                     // flat front edge
     ctx.quadraticCurveTo(L, W, L - c, W);
     ctx.lineTo(-shoulder, W);
-    ctx.bezierCurveTo(-L - L / 4, W, -L - L / 4, -W, -shoulder, -W);   // rounded rear, apex at x ≈ -L
+    ctx.bezierCurveTo(-L * 0.62, W, -L * 0.95, W * 0.72, -L * 1.02, 0);        // rear apex at x ≈ -L
+    ctx.bezierCurveTo(-L * 0.95, -W * 0.72, -L * 0.62, -W, -shoulder, -W);
     ctx.closePath();
   }
 
