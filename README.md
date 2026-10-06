@@ -100,6 +100,8 @@ The simulation is available as a live demo at
 <https://sruti-n.github.io/quantum_swarm_sim> — no installation needed. If you
 want to run it locally or contribute to development, follow the steps below.
 
+To run locally, you need Python 3 and `pip` installed.
+
 ### Option 1: One-click script
 
 From the project root:
