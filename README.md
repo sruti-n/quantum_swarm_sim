@@ -96,9 +96,9 @@ with abstract concepts produces deeper understanding than passive instruction.
 **Live demo:** <https://sruti-n.github.io/quantum_swarm_sim> — no installation
 needed. The backend may take up to 60 seconds to wake from sleep on first load.
 
-This is a locally-run application. The quantum results come from a Python
-backend (FastAPI + Qiskit) that must be running on your own machine, so the
-simulation is not hosted online. You need Python 3 and `pip` installed.
+The simulation is available as a live demo at
+<https://sruti-n.github.io/quantum_swarm_sim> — no installation needed. If you
+want to run it locally or contribute to development, follow the steps below.
 
 ### Option 1: One-click script
 
@@ -158,11 +158,9 @@ To deploy your own instance:
 
 1. Deploy the backend to Render by connecting your GitHub repository and
    pointing it at the `backend/` folder.
-2. Copy the Render URL and replace `YOUR_RENDER_URL_HERE` in
-   `frontend/index.html`.
-3. Enable GitHub Pages in your repository settings, set source to `main`
+2. Enable GitHub Pages in your repository settings, set source to `main`
    branch and root folder.
-4. The frontend will be available at
+3. The frontend will be available at
    <https://sruti-n.github.io/quantum_swarm_sim>.
 
 > **Note:** The free tier backend may take 30–60 seconds to wake up after
