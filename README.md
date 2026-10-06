@@ -20,7 +20,81 @@ rate, trigger measurement, and observe the consequences of their choices rather
 than passively watching an animation. Stage 2 of the project extends this work
 to a physical robot prototype.
 
+## About This Project
+
+Quantum computing is one of the fastest-growing fields in science and
+engineering, but it remains inaccessible to most people because of the advanced
+prerequisites needed to understand it. This simulation was built to change that.
+
+Bridging the Quantum Gap is an interactive web simulation that uses a swarm of
+robots to model the behavior of quantum bits (qubits). Each robot represents a
+qubit, and the way the robots move, synchronize, and respond to your input
+reflects real quantum phenomena — superposition, entanglement, and decoherence —
+simulated through IBM's Qiskit framework in real time.
+
+You do not need a background in physics or computer science to use it. Select a
+gate, watch the robots enter superposition, and press Space to collapse the
+wavefunction. The explanation panel adjusts to your level of knowledge, from
+complete beginner to advanced.
+
+This project is Stage 1 of a two-stage research project conducted at the
+Applied Physics Research Laboratory at Princeton International School of
+Mathematics and Science (PRISMS). Stage 2 will translate this simulation into a
+physical robot swarm, adding a tactile dimension to the learning experience.
+
+## Research Background
+
+This simulation is grounded in published research across two areas: quantum
+computing and educational technology.
+
+On the quantum side, Hung et al. (2019) established that quantum programs are
+almost certain to contain errors, and that no principled method yet exists to
+reason about erroneous quantum behavior — motivating the need for accessible
+tools that make these errors visible and understandable. Nachman et al. (2020)
+identified readout noise as a significant source of quantum error and explored
+unfolding methods to correct it. Steane (1996) laid foundational groundwork for
+quantum error correction by adapting classical error correction codes to
+quantum systems. Abdisatarov et al. (2025) demonstrated that magnetic field
+engineering can reduce temporal noise in transmon qubits, showing that
+decoherence is an active and solvable problem.
+
+On the educational side, Mannone, Seidita, and Chella (2023) demonstrated that
+quantum computing can be directly applied to model swarm robot interactions
+through quantum circuits, establishing a precedent for the approach this
+simulation takes. Hany, Akl, Ramadan, and Atia (2023) conducted a controlled
+experiment showing that tangible user interfaces outperformed traditional
+textbook instruction by 25.4% in learning gains and produced significantly
+better retention two weeks later (1.5% loss versus 7.2% loss for the textbook
+group) — providing empirical support for why interactive, physical interaction
+with abstract concepts produces deeper understanding than passive instruction.
+
+### Full citations
+
+- Abdisatarov, B., et al. (2025). Demonstrating magnetic field robustness and
+  reducing temporal T1 noise in transmon qubits through magnetic field
+  engineering. *arXiv*. <https://doi.org/10.48550/arXiv.2506.02187>
+- Hany, A., Akl, A., Ramadan, E., & Atia, A. (2023). The effect of using
+  tangible user interfaces compared to traditional learning for teaching
+  programming in higher education: An experimental study. *2023 Intelligent
+  Methods, Systems, and Applications (IMSA)*.
+  <https://doi.org/10.1109/IMSA58542.2023.10217780>
+- Hung, S.-H., et al. (2019). Quantitative robustness analysis of quantum
+  programs. *Proceedings of the ACM on Programming Languages, 3*(POPL), Article
+  31. <https://doi.org/10.1145/3290344>
+- Mannone, M., Seidita, V., & Chella, A. (2023). Modeling and designing a
+  robotic swarm: A quantum computing approach. *Swarm and Evolutionary
+  Computation, 79*, 101297. <https://doi.org/10.1016/j.swevo.2023.101297>
+- Nachman, B., et al. (2020). Unfolding quantum computer readout noise. *npj
+  Quantum Information, 6*, Article 84.
+  <https://doi.org/10.1038/s41534-020-00309-7>
+- Steane, A. M. (1996). Multiple-particle interference and quantum error
+  correction. *Proceedings of the Royal Society of London. Series A,
+  452*(1954), 2551–2577. <https://doi.org/10.1098/rspa.1996.0136>
+
 ## How to Run
+
+**Live demo:** <https://sruti-n.github.io/quantum_swarm_sim> — no installation
+needed. The backend may take up to 60 seconds to wake from sleep on first load.
 
 This is a locally-run application. The quantum results come from a Python
 backend (FastAPI + Qiskit) that must be running on your own machine, so the
@@ -151,3 +225,11 @@ than appending misaligned rows.
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## About the Researcher
+
+Sruti Nallakukkala is a senior at Princeton International School of
+Mathematics and Science (PRISMS), conducting independent research in the
+Applied Physics Research Laboratory under the mentorship of Mr. George Heim.
+This project is part of a two-year research arc exploring how robotic systems
+can make quantum computing concepts accessible to broader audiences.
