@@ -1087,7 +1087,9 @@
 
   function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var host = location.host || 'localhost:8000';
+    var host = location.hostname === '127.0.0.1' || location.hostname === 'localhost'
+      ? 'localhost:8000'
+      : 'YOUR_RENDER_URL_HERE';
     ws = new WebSocket(proto + '//' + host + '/ws');
 
     ws.onopen = function () {

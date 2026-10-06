@@ -9,11 +9,19 @@ sends it outward, the receiver acts on it. The serial port becomes a WebSocket.
 import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from quantum_engine import QuantumEngine
 
 app = FastAPI(title="Quantum Swarm Simulation")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 engine = QuantumEngine()
 
