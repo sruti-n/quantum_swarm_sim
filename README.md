@@ -73,6 +73,28 @@ turn on **Advanced: Custom Draw Code** and write your own
 `drawRobot(ctx, x, y, angle, color, size)` function. **Reset to Default**
 brings back the standard vehicle. See Section 4.5 of the spec for details.
 
+## Deployment
+
+The simulation is deployed as two separate services:
+
+- **Frontend:** GitHub Pages (static HTML)
+- **Backend:** Render (FastAPI + Qiskit)
+
+To deploy your own instance:
+
+1. Deploy the backend to Render by connecting your GitHub repository and
+   pointing it at the `backend/` folder.
+2. Copy the Render URL and replace `YOUR_RENDER_URL_HERE` in
+   `frontend/index.html`.
+3. Enable GitHub Pages in your repository settings, set source to `main`
+   branch and root folder.
+4. The frontend will be available at
+   <https://sruti-n.github.io/quantum_swarm_sim>.
+
+> **Note:** The free tier backend may take 30–60 seconds to wake up after
+> inactivity. The loading indicator in the simulation will display during
+> this time.
+
 ## Project Structure
 
 ```
