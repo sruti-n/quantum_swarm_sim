@@ -53,7 +53,7 @@
     color: var(--muted);
   }
 
-  #modeIndicator {
+  #modeIndicator, #tourIndicator {
     font-size: 12px;
     font-weight: 600;
     padding: 5px 12px;
@@ -361,6 +361,116 @@
   @media (max-width: 860px) {
     .main { grid-template-columns: 1fr; }
   }
+
+  /* ---------- guided tour ----------
+     The overlay dims the canvas but lets clicks through; only the card and the
+     prompt strip take pointer events, so the simulation stays fully usable. */
+  #tourIndicator { color: var(--gold); margin-left: 6px; }
+
+  .tour-fade {
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .25s ease, visibility 0s linear .25s;
+  }
+  .tour-fade.on {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity .25s ease;
+  }
+
+  #tourOverlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(2,4,10,.5);
+    pointer-events: none;
+  }
+
+  .tour-card {
+    position: relative;
+    pointer-events: auto;
+    width: 100%;
+    max-width: 440px;
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid #2c4a7a;
+    border-radius: 12px;
+    padding: 18px 20px 16px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.55);
+  }
+  .tour-card.enter { animation: tour-card-in .3s ease both; }
+  @keyframes tour-card-in {
+    from { opacity: 0; transform: translateY(8px) scale(.98); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .tour-step {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tour-card h3 { margin: 2px 70px 10px 0; font-size: 17px; font-weight: 600; color: var(--text); }
+  .tour-card p { margin: 0 0 10px; color: #c7d1e8; font-size: 13.5px; }
+  .tour-card ul { margin: 0 0 10px; padding-left: 18px; color: #c7d1e8; font-size: 13.5px; }
+  .tour-card li { margin-bottom: 6px; }
+  .tour-card li b { color: var(--text); }
+  .tour-card .tour-live { color: var(--gold); font-variant-numeric: tabular-nums; }
+  .tour-card .tour-footer {
+    margin: 12px 0 14px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    border: 1px solid #2c4a7a;
+    background: #111c31;
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .tour-actions { display: flex; justify-content: flex-end; }
+  .tour-actions button { min-width: 120px; }
+  button.tour-primary { background: var(--accent); border-color: var(--accent); color: #04121f; }
+  button.tour-primary:hover:not(:disabled):not(.active) { background: #6cb4ff; color: #04121f; }
+
+  button.tour-skip {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    background: transparent;
+  }
+
+  #tourStrip {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 7px 8px 7px 12px;
+    background: rgba(13,18,32,.94);
+    border: 1px solid #2c4a7a;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  #tourStrip .tour-strip-text { flex: 1 1 200px; }
+  #tourStrip .tour-strip-text b { color: var(--gold); font-weight: 600; margin-right: 6px; }
+  #tourStrip button { padding: 4px 9px; font-size: 11.5px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tour-fade, .tour-fade.on { transition: none; }
+    .tour-card.enter { animation: none; }
+  }
 </style>
 </head>
 <body>
@@ -373,6 +483,7 @@
   <div>
     <span id="connDot"></span><span id="connText" style="font-size:11px;color:var(--muted)">connecting…</span>
     <span id="modeIndicator" style="margin-left:10px">Idle</span>
+    <span id="tourIndicator" hidden>Tour Mode</span>
   </div>
 </header>
 
@@ -390,6 +501,24 @@
       <div id="loadingTitle"></div>
       <div id="loadingDetail"></div>
       <div class="scan"></div>
+    </div>
+    <div id="tourOverlay" class="tour-fade">
+      <div class="tour-card" id="tourCard" role="dialog" aria-modal="false" aria-labelledby="tourTitle">
+        <button class="tour-skip" id="tourSkip">Skip Tour</button>
+        <div class="tour-step" id="tourStepLabel"></div>
+        <h3 id="tourTitle"></h3>
+        <div id="tourBody"></div>
+        <div class="tour-footer" id="tourFooter"></div>
+        <div class="tour-actions">
+          <button class="tour-primary" id="tourPrimary"></button>
+        </div>
+      </div>
+    </div>
+    <div id="tourStrip" class="tour-fade" role="status" aria-live="polite">
+      <span class="tour-strip-text"><b>Tour</b><span id="tourStripText"></span></span>
+      <button id="tourStripCard">Show card</button>
+      <button id="tourStripNext" class="primary"></button>
+      <button id="tourStripSkip">Skip Tour</button>
     </div>
   </div>
 
@@ -443,6 +572,9 @@
       <div class="row">
         <button id="btnMeasure">Measure <span class="hint">Space</span></button>
         <button id="btnReset">Reset <span class="hint">R</span></button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnTour"><span id="btnTourLabel">Start Tour</span> <span class="hint">T</span></button>
       </div>
     </div>
 
@@ -1155,6 +1287,7 @@
       refreshExplanation();
       updateModeIndicator();
       setControlsEnabled(true);
+      tourEvent('superState', msg);
 
     } else if (msg.type === 'measurement_result') {
       hideLoading();
@@ -1201,6 +1334,7 @@
         fidelity: msg.fidelity
       });
       updateModeIndicator();
+      tourEvent('measured', msg);
 
     } else if (msg.type === 'entanglement_state') {
       hideLoading();
@@ -1225,6 +1359,7 @@
       refreshExplanation();
       updateModeIndicator();
       setControlsEnabled(true);
+      tourEvent('entState', msg);
 
     } else if (msg.type === 'error') {
       hideLoading();
@@ -1249,6 +1384,7 @@
       send({ type: 'simulate', gate: state.gate, noise_rate: state.noise, num_robots: state.count, shots: state.shots });
     }
     setStatus('Quantum circuit running...');
+    tourEvent('simulate');
   }
 
   function doMeasure() {
@@ -1269,6 +1405,7 @@
     // robots are showing, even if its session state was lost on a reconnect.
     send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: state.robots.length,
            shots: state.shots, mode: state.mode });
+    tourEvent('measure');
   }
 
   function doReset() {
@@ -1301,6 +1438,7 @@
     doReset();
     refreshExplanation();
     if (raised) setStatus('Entanglement needs a pair of qubits, so the robot count was raised to 2.');
+    tourEvent('mode', mode);
   }
 
   function setCount(n) {
@@ -1319,6 +1457,7 @@
     noiseVal.textContent = state.noise.toFixed(2);
     setData({ noise: state.noise });
     send({ type: 'set_noise', noise_rate: state.noise });
+    tourEvent('noise', state.noise);
   }
 
   function shotsLabel() {
@@ -1454,11 +1593,424 @@
   shapeJson.value = SHAPE_JSON_TEMPLATE;
   shapeCode.value = SHAPE_CODE_TEMPLATE;
 
+  // ---------- guided tour ----------
+  // Tour mode only narrates. Each step waits for the user to act through the
+  // normal controls and reacts to the event that action produces (tourEvent is
+  // called from doSimulate, handleMessage, setNoise, ...). Outside tour mode
+  // tourEvent returns immediately, so free exploration is unchanged.
+  var TOUR_TOTAL_STEPS = 7;
+  var TOUR_ANIM_MS = 1100;   // let the measurement snap and pair-link flash finish before the card
+
+  var tour = {
+    active: false,
+    step: null,
+    cardOpen: false,     // false: card dismissed, the prompt strip carries the instruction
+    animate: false,      // replay the card's entrance on the next render
+    timer: 0,
+    wrongGate: null,     // gate of a superposition run made with something other than H
+    noiseBase: 0,        // noise rate the decoherence step must rise above
+    pairs: null          // last Bell measurement, for the correlation count
+  };
+
+  var tourOverlay = $('tourOverlay'), tourCard = $('tourCard'), tourStepLabel = $('tourStepLabel');
+  var tourTitle = $('tourTitle'), tourBody = $('tourBody'), tourFooter = $('tourFooter');
+  var tourPrimary = $('tourPrimary'), tourStrip = $('tourStrip'), tourStripText = $('tourStripText');
+  var tourStripNext = $('tourStripNext'), tourIndicator = $('tourIndicator');
+  var btnTour = $('btnTour'), btnTourLabel = $('btnTourLabel');
+
+  function byLevel(text) { return text[state.level] || text.beginner; }
+
+  // Body items: a string is a paragraph, { live } a highlighted live line,
+  // { list: [[term, text], ...] } a bulleted summary.
+  var TOUR_STEPS = {
+    intro: {
+      n: 1,
+      title: 'Welcome to the Tour',
+      body: function () {
+        return [byLevel({
+          beginner: "This short tour shows three big ideas from quantum computing — superposition, entanglement and decoherence — using a swarm of robots. Each robot is steered by its own qubit, so watching the robots means watching the qubits.",
+          intermediate: "Each robot is driven by a simulated qubit: its heading encodes the measured P(|1⟩) as an angle from 0° to 180°. You'll prepare a superposition, measure it, entangle pairs of qubits, then add noise and watch decoherence set in.",
+          advanced: "Each robot maps one qubit's estimated P(|1⟩) to a heading θ = int(p̂ × 180°). Circuits run on Qiskit Aer with a depolarizing noise model. You'll sample H|0⟩, measure Bell pairs, and sweep the depolarizing rate ε."
+        })];
+      },
+      footer: function () {
+        return 'You do every step yourself with the normal controls — the tour only explains what happens. Press T or Skip Tour to leave at any time.';
+      },
+      primary: function () { return { label: 'Start', go: 'gate' }; },
+      prompt: function () { return 'Click Start to begin.'; },
+      on: {
+        gate: function (g) { if (g === 'h') goTourStep('simulate'); },
+        simulate: hideTourCard,
+        superState: function (msg) { TOUR_STEPS.simulate.on.superState(msg); }
+      }
+    },
+
+    gate: {
+      n: 2,
+      title: 'Choose a Gate',
+      body: function () {
+        return [byLevel({
+          beginner: "A gate is an instruction that changes a qubit. Start with the H (Hadamard) gate — it's the one that creates superposition.",
+          intermediate: "Gates are operations on the qubit's state. The Hadamard gate H takes |0⟩ to the equal superposition (|0⟩ + |1⟩)/√2.",
+          advanced: "H = (1/√2)[[1,1],[1,−1]] rotates the computational basis onto the X basis: H|0⟩ = |+⟩ = (|0⟩ + |1⟩)/√2."
+        })];
+      },
+      footer: function () {
+        return state.gate === 'h'
+          ? 'H is already selected in the Gate dropdown. Click Use H gate, or press 1, to continue.'
+          : 'Select H — Hadamard in the Gate dropdown, or press 1.';
+      },
+      primary: function () {
+        return state.gate === 'h' ? { label: 'Use H gate', go: 'simulate' } : { label: 'Got it', hide: true };
+      },
+      prompt: function () { return 'Select H in the Gate dropdown, or press 1.'; },
+      on: {
+        gate: function (g) { if (g === 'h') goTourStep('simulate'); else renderTour(); },
+        simulate: hideTourCard,
+        superState: function (msg) { TOUR_STEPS.simulate.on.superState(msg); }
+      }
+    },
+
+    simulate: {
+      n: 3,
+      title: 'Run the Circuit',
+      enter: function () { tour.wrongGate = null; },
+      body: function () {
+        return [byLevel({
+          beginner: "Now run the experiment. Each robot gets its own tiny quantum circuit with the H gate applied, and the robots will show you what their qubits are doing.",
+          intermediate: "Simulate builds one circuit per robot — H applied to |0⟩ — and runs it on a simulated quantum backend at the noise rate you've set.",
+          advanced: "Simulate runs H|0⟩ for each robot on Qiskit Aer under depolarizing noise at rate ε, sampling the selected number of shots to estimate P(|1⟩)."
+        })];
+      },
+      footer: function () { return TOUR_STEPS.simulate.prompt(); },
+      primary: function () { return { label: 'Got it', hide: true }; },
+      prompt: function () {
+        if (tour.wrongGate && state.gate !== 'h') {
+          return 'That run used the ' + tour.wrongGate.toUpperCase() + ' gate. Select H (press 1), then press S or click Simulate again.';
+        }
+        if (state.mode === 'entanglement') {
+          return "You're in Entanglement mode. Click Superposition (or press E), then press S or click Simulate.";
+        }
+        return 'Press S or click Simulate.';
+      },
+      on: {
+        simulate: hideTourCard,
+        gate: function () { renderTour(); },
+        mode: function () { renderTour(); },
+        superState: function (msg) {
+          if (msg.gate === 'h') { goTourStep('superposition'); return; }
+          if (tour.step !== 'simulate') goTourStep('simulate');
+          tour.wrongGate = msg.gate;
+          renderTour();
+        }
+      }
+    },
+
+    superposition: {
+      n: 3,
+      title: 'Superposition',
+      body: function () { return [COPY[state.level].h]; },
+      footer: function () {
+        return 'Watch the robots — they are in superposition. When you are ready, press Space or click Measure.';
+      },
+      primary: function () { return { label: 'Got it', hide: true }; },
+      prompt: function () { return 'The robots are in superposition. Press Space or click Measure.'; },
+      on: {
+        simulate: hideTourCard,
+        measure: hideTourCard,
+        measured: function (msg) {
+          if (msg.mode !== 'entanglement') afterTourAnimation(function () { goTourStep('measurement'); });
+        }
+      }
+    },
+
+    measurement: {
+      n: 4,
+      title: 'Measurement',
+      body: function () {
+        return [byLevel({
+          beginner: "You just caught the spinning coin. Measuring forced each robot to pick a definite answer — the blur of possibilities collapsed into a single result, and the robot snapped to that angle. Physicists call this wavefunction collapse. The faint outline on each robot is its ghost: where it would point with no noise. Green robots landed close to it; red ones were pushed off.",
+          intermediate: "Measurement projects each qubit onto |0⟩ or |1⟩ with Born-rule probabilities — 50/50 for H. Each robot's angle is P(|1⟩) estimated over all its shots and mapped onto 0°–180°. Its faint ghost marks the ideal 90°, and its color shows the angle error, from green (on target) to red.",
+          advanced: "A computational-basis measurement applies the projectors |0⟩⟨0| and |1⟩⟨1|: outcome b occurs with probability |⟨b|ψ⟩|² and leaves the qubit in |b⟩. Each robot reports p̂ = k/N over N shots and turns to θ = int(p̂ × 180°); its ghost shows θ_ideal = 90°. Fidelity is 1 − |p̂ − p_ideal|, averaged over the swarm."
+        })];
+      },
+      footer: function () {
+        return "The result is random — run it again and you'll get a different outcome. Press S, then Space, to try. Click Continue when you're ready for entanglement.";
+      },
+      primary: function () { return { label: 'Continue', go: 'entangle' }; },
+      prompt: function () { return 'Press S, then Space, to measure again and compare — or click Continue for entanglement.'; },
+      on: {
+        simulate: hideTourCard,
+        measure: hideTourCard,
+        mode: function (m) { if (m === 'entanglement') goTourStep('entangle'); }
+      }
+    },
+
+    entangle: {
+      n: 5,
+      title: 'Entangle the Robots',
+      body: function () {
+        return [byLevel({
+          beginner: "Next, link the robots in pairs. Entangled robots behave like one system: whatever answer one gives, its partner gives the same — even though each answer on its own is random.",
+          intermediate: "Entanglement mode groups the robots into pairs and prepares each pair as a two-qubit Bell state, in which neither qubit has a state of its own.",
+          advanced: "Entanglement mode prepares each adjacent pair of robots (1–2, 3–4, …) in |Φ⁺⟩ = (|00⟩ + |11⟩)/√2 using H on the first qubit followed by CNOT."
+        })];
+      },
+      footer: function () { return TOUR_STEPS.entangle.prompt(); },
+      primary: function () { return { label: 'Got it', hide: true }; },
+      prompt: function () {
+        return state.mode === 'entanglement'
+          ? 'Entanglement mode is on. Now press S or click Simulate.'
+          : 'Press E or click Entanglement, then press S or click Simulate.';
+      },
+      on: {
+        mode: function (m) { if (m === 'entanglement') hideTourCard(); else renderTour(); },
+        simulate: hideTourCard,
+        entState: function () { goTourStep('entangled'); }
+      }
+    },
+
+    entangled: {
+      n: 5,
+      title: 'Entanglement',
+      body: function () { return [COPY[state.level].entangled]; },
+      footer: function () {
+        return 'The dashed lines join each entangled pair. Press Space or click Measure, then watch the paired robots land on matching angles.';
+      },
+      primary: function () { return { label: 'Got it', hide: true }; },
+      prompt: function () { return 'The dashed lines link each pair. Press Space or click Measure and watch both robots in a pair.'; },
+      on: {
+        simulate: hideTourCard,
+        measure: hideTourCard,
+        measured: function (msg) {
+          if (msg.mode !== 'entanglement') return;
+          tour.pairs = msg;
+          afterTourAnimation(function () { goTourStep('correlated'); });
+        }
+      }
+    },
+
+    correlated: {
+      n: 5,
+      title: 'Correlated Outcomes',
+      enter: function () { tour.noiseBase = state.noise; },
+      body: function () {
+        var items = [byLevel({
+          beginner: "Look at each linked pair: both robots landed on the same answer — both at 0° or both at 180°. Which answer came up was random, but the partners agreed. Neither robot told the other; measuring the pair settled both at once.",
+          intermediate: "Each Bell pair collapsed to |00⟩ or |11⟩ with equal probability, so partners point to the same angle — 0° or 180°. Here a robot's ghost is its partner's outcome, so a matching pair shows no error. Noise lets the uncorrelated outcomes |01⟩ and |10⟩ appear.",
+          advanced: "Measuring |Φ⁺⟩ in the Z basis yields 00 or 11 with probability ½ each: ⟨Z⊗Z⟩ = 1 while each marginal is maximally random. Depolarizing errors on the H and CNOT gates admit 01 and 10; each robot's ghost is its partner's measured angle, so the error metric counts anti-correlated pairs."
+        })];
+        var p = tour.pairs;
+        if (p && p.pairs_total) {
+          items.push({ live: 'This run: ' + p.pairs_correlated + ' of ' + p.pairs_total +
+            (p.pairs_total === 1 ? ' pair' : ' pairs') + ' agreed.' });
+        }
+        return items;
+      },
+      footer: function () { return 'Next, decoherence: drag the Noise rate slider upward, or press ↑.'; },
+      primary: function () { return { label: 'Got it', hide: true }; },
+      prompt: function () { return 'Drag the Noise rate slider upward, or press ↑.'; },
+      on: {
+        simulate: hideTourCard,
+        measure: hideTourCard,
+        measured: function (msg) { if (msg.mode === 'entanglement') { tour.pairs = msg; renderTour(); } },
+        noise: function (v) {
+          // only a rise counts; moving down first (e.g. from 1.0) just lowers the bar
+          if (v > tour.noiseBase + 1e-9) goTourStep('decoherence');
+          else tour.noiseBase = v;
+        }
+      }
+    },
+
+    decoherence: {
+      n: 6,
+      title: 'Decoherence',
+      body: function () {
+        return [byLevel({
+          beginner: "Noise is the outside world bumping into the qubits — heat, stray signals, tiny vibrations. Each bump scrambles a little of the quantum information, and that loss is called decoherence. The more noise, the further the robots drift from where they should point (their faint ghosts), and the weaker the link between entangled partners — watch the pair lines turn red.",
+          intermediate: "Decoherence is a qubit leaking information into its environment. Here it is modeled as depolarizing noise: with probability ε the qubit suffers a random Pauli error. As ε rises, measured probabilities drift toward 0.5, so robots wander from their ideal ghosts and entangled partners stop agreeing.",
+          advanced: "The depolarizing channel ρ → (1−ε)ρ + (ε/3)(XρX + YρY + ZρZ) contracts the Bloch vector by (1 − 4ε/3), pulling every P(|1⟩) toward 0.5. Applied to the H and CNOT of a Bell circuit it shrinks ⟨Z⊗Z⟩, so pair agreement falls toward chance and swarm fidelity drops with it."
+        }), { live: 'Noise rate is now ' + state.noise.toFixed(2) + '.' }];
+      },
+      footer: function () {
+        return 'Press S, then Space, to run again at this noise level and compare the robots with their ghosts. Click Finish Tour when you are done.';
+      },
+      primary: function () { return { label: 'Finish Tour', go: 'complete' }; },
+      prompt: function () { return 'Try a few noise levels with S then Space — click Finish Tour when you are done.'; },
+      on: {
+        noise: function () { renderTour(); },
+        simulate: hideTourCard,
+        measure: hideTourCard
+      }
+    },
+
+    complete: {
+      n: 7,
+      title: 'Tour Complete',
+      body: function () {
+        return ["You've explored the three ideas at the heart of quantum computing:", { list: byLevel({
+          beginner: [
+            ['Superposition', 'a qubit can be a blend of 0 and 1 until it is measured, like a spinning coin.'],
+            ['Entanglement', 'paired qubits share one state, so measuring them gives matching answers.'],
+            ['Decoherence', 'noise from the environment scrambles quantum states and pulls the robots off target.']
+          ],
+          intermediate: [
+            ['Superposition', 'H creates (|0⟩ + |1⟩)/√2; measurement returns 0 or 1 with Born-rule probabilities.'],
+            ['Entanglement', "a Bell pair's outcomes are perfectly correlated even though each one alone is random."],
+            ['Decoherence', 'depolarizing noise pushes P(|1⟩) toward 0.5 and breaks pair correlations, lowering fidelity.']
+          ],
+          advanced: [
+            ['Superposition', 'H|0⟩ = |+⟩; Z-basis sampling gives p̂ = k/N with standard error √(p(1−p)/N).'],
+            ['Entanglement', '|Φ⁺⟩ has ⟨Z⊗Z⟩ = 1 with maximally mixed marginals.'],
+            ['Decoherence', 'the depolarizing channel contracts the Bloch vector by (1 − 4ε/3), degrading single-qubit fidelity and two-qubit correlation alike.']
+          ]
+        }) }];
+      },
+      footer: function () {
+        return 'The simulation is all yours now — try other gates, more robots or different shot counts. The Explanation panel below keeps up as you go.';
+      },
+      primary: function () { return { label: 'Explore Freely', exit: true }; },
+      prompt: function () { return 'Tour complete. Click Explore Freely to leave tour mode.'; },
+      on: {}
+    }
+  };
+
+  function renderTourBody(items) {
+    tourBody.textContent = '';
+    items.forEach(function (item) {
+      var el;
+      if (typeof item === 'string') {
+        el = document.createElement('p');
+        el.textContent = item;
+      } else if (item.live) {
+        el = document.createElement('p');
+        el.className = 'tour-live';
+        el.textContent = item.live;
+      } else {
+        el = document.createElement('ul');
+        item.list.forEach(function (pair) {
+          var li = document.createElement('li'), b = document.createElement('b');
+          b.textContent = pair[0];
+          li.appendChild(b);
+          li.appendChild(document.createTextNode(' — ' + pair[1]));
+          el.appendChild(li);
+        });
+      }
+      tourBody.appendChild(el);
+    });
+  }
+
+  function renderTour() {
+    tourIndicator.hidden = !tour.active;
+    btnTourLabel.textContent = tour.active ? 'Exit Tour' : 'Start Tour';
+    if (!tour.active) {
+      tourOverlay.classList.remove('on');
+      tourStrip.classList.remove('on');
+      return;
+    }
+
+    var s = TOUR_STEPS[tour.step], p = s.primary();
+    tourStepLabel.textContent = 'Step ' + s.n + ' of ' + TOUR_TOTAL_STEPS;
+    tourTitle.textContent = s.title;
+    renderTourBody(s.body());
+    tourFooter.textContent = s.footer();
+    tourPrimary.textContent = p.label;
+    tourStripText.textContent = s.prompt();
+    tourStripNext.textContent = p.label;
+    tourStripNext.hidden = !(p.go || p.exit);
+
+    tourOverlay.classList.toggle('on', tour.cardOpen);
+    tourStrip.classList.toggle('on', !tour.cardOpen);
+    if (tour.animate && tour.cardOpen) {
+      tourCard.classList.remove('enter');
+      void tourCard.offsetWidth;   // restart the entrance animation
+      tourCard.classList.add('enter');
+      tourCard.scrollTop = 0;
+    }
+    tour.animate = false;
+  }
+
+  function clearTourTimer() {
+    clearTimeout(tour.timer);
+    tour.timer = 0;
+  }
+
+  function afterTourAnimation(fn) {
+    clearTourTimer();
+    tour.timer = setTimeout(function () {
+      tour.timer = 0;
+      if (tour.active) fn();
+    }, TOUR_ANIM_MS);
+  }
+
+  function goTourStep(id) {
+    clearTourTimer();
+    tour.step = id;
+    if (TOUR_STEPS[id].enter) TOUR_STEPS[id].enter();
+    tour.cardOpen = true;
+    tour.animate = true;
+    renderTour();
+  }
+
+  function showTourCard() {
+    tour.cardOpen = true;
+    tour.animate = true;
+    renderTour();
+  }
+
+  function hideTourCard() {
+    if (!tour.cardOpen) return;
+    tour.cardOpen = false;
+    renderTour();
+  }
+
+  function tourPrimaryAction() {
+    var p = TOUR_STEPS[tour.step].primary();
+    if (p.exit) exitTour();
+    else if (p.go) goTourStep(p.go);
+    else hideTourCard();
+  }
+
+  function startTour() {
+    tour.active = true;
+    tour.pairs = null;
+    goTourStep('intro');
+  }
+
+  function exitTour() {
+    clearTourTimer();
+    tour.active = false;
+    tour.step = null;
+    tour.cardOpen = false;
+    renderTour();
+  }
+
+  function toggleTour() {
+    if (tour.active) exitTour(); else startTour();
+  }
+
+  // Called by the simulation as things happen; a no-op outside tour mode.
+  function tourEvent(name, data) {
+    if (!tour.active) return;
+    // a new run replaces whatever result a pending card was about to describe
+    if (name === 'simulate') clearTourTimer();
+    var handler = TOUR_STEPS[tour.step].on[name];
+    if (handler) handler(data);
+  }
+
+  btnTour.addEventListener('click', toggleTour);
+  tourPrimary.addEventListener('click', tourPrimaryAction);
+  tourStripNext.addEventListener('click', tourPrimaryAction);
+  $('tourStripCard').addEventListener('click', showTourCard);
+  $('tourSkip').addEventListener('click', exitTour);
+  $('tourStripSkip').addEventListener('click', exitTour);
+
   // ---------- events ----------
   gateSel.addEventListener('change', function () {
     state.gate = gateSel.value;
     setData({ gate: state.gate, ideal: IDEAL[state.gate].angle });
     refreshExplanation();
+    tourEvent('gate', state.gate);
   });
 
   countInput.addEventListener('change', function () { setCount(parseInt(countInput.value, 10)); });
@@ -1480,6 +2032,7 @@
       b.classList.add('active');
       state.level = b.getAttribute('data-level');
       refreshExplanation();
+      renderTour();   // an open tour card switches to the new level in place
     });
   });
 
@@ -1514,7 +2067,9 @@
       gateSel.value = state.gate;
       setData({ gate: state.gate, ideal: IDEAL[state.gate].angle });
       refreshExplanation();
+      tourEvent('gate', state.gate);
     }
+    else if (k === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) { toggleTour(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setNoise(state.noise + 0.05); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); setNoise(state.noise - 0.05); }
     else if (e.key === '+' || e.key === '=') { setCount(state.count + 1); }
