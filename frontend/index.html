@@ -667,6 +667,24 @@
   };
   var GATE_KEYS = ['h', 'x', 'id', 'sx', 'y', 'z'];
 
+  // A measurement is one shot, so it can only land on 0° (|0⟩) or 180° (|1⟩).
+  // IDEAL[g].angle (P × 180) is the ideal of the multi-shot estimate, not of one
+  // shot: for H and SX it is 90°, which no single outcome can ever hit. The
+  // single-shot ideal is any outcome the noiseless circuit can produce, so a
+  // robot is on target when it landed on one of those and 180° off when noise
+  // produced an outcome the ideal circuit never would.
+  function idealOutcomeFor(gate, angle) {
+    var p = IDEAL[gate].prob;
+    if (p <= 0) return 0;
+    if (p >= 1) return 180;
+    return angle;   // both outcomes are possible, so whichever one it landed on is ideal
+  }
+
+  function idealOutcomeLabel(gate) {
+    var p = IDEAL[gate].prob;
+    return p <= 0 ? '0°' : p >= 1 ? '180°' : '0° or 180°';
+  }
+
   // ---------- state ----------
   var state = {
     mode: 'superposition',       // 'superposition' | 'entanglement'
@@ -741,8 +759,8 @@
   function colorFor(r) {
     if (state.phase === 'entangled') return '#ffc65c';
     if (state.phase === 'measured' && r.errorDeg !== null) {
-      // green at zero error, ramping to red as the angle error grows
-      var t = Math.min(1, r.errorDeg / 90);
+      // green at zero error, ramping to red at the largest possible error (180°)
+      var t = Math.min(1, r.errorDeg / 180);
       var cr = Math.round(74 + (255 - 74) * t);
       var cg = Math.round(222 + (107 - 222) * t);
       var cb = Math.round(128 + (94 - 128) * t);
@@ -1001,27 +1019,56 @@
     if (r.y < 0) r.y += h; if (r.y > h) r.y -= h;
   }
 
+  // Entangled robots bounce off the edges instead of wrapping: a wrap would put
+  // one partner on the far side of the canvas and stretch the pair link across it.
+  function bounce(r, w, h) {
+    if (r.x < 0) { r.x = -r.x; r.vx = Math.abs(r.vx); }
+    if (r.x > w) { r.x = 2 * w - r.x; r.vx = -Math.abs(r.vx); }
+    if (r.y < 0) { r.y = -r.y; r.vy = Math.abs(r.vy); }
+    if (r.y > h) { r.y = 2 * h - r.y; r.vy = -Math.abs(r.vy); }
+    r.x = Math.max(0, Math.min(w, r.x));
+    r.y = Math.max(0, Math.min(h, r.y));
+  }
+
+  function contain(r, w, h) {
+    if (state.mode === 'entanglement') bounce(r, w, h);
+    else wrap(r, w, h);
+  }
+
+  // Unentangled qubits share no state, so in superposition each robot wanders on
+  // its own: no cohesion, no alignment, nothing that reads its neighbours. The
+  // only interaction is the global separation below, which just prevents overlap.
   function stepSuperposition(r, w, h) {
-    // genuinely chaotic, individual wandering — no coordination between robots
     r.wander += (Math.random() - 0.5) * 0.45;
     r.vx += Math.cos(r.wander) * 0.09;
     r.vy += Math.sin(r.wander) * 0.09;
     var sp = Math.hypot(r.vx, r.vy), max = 1.9;
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
     r.x += r.vx; r.y += r.vy;
-    wrap(r, w, h);
+    contain(r, w, h);
     // the vehicle now has an obvious front, so steer it to face where it is driving
     r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15 + (Math.random() - 0.5) * 0.08;
   }
+
+  // Entangled partners sit about PAIR_REST apart. Past that a spring pulls them
+  // together, harder the further they drift; PAIR_LEASH is the hard limit.
+  var PAIR_REST = 60;        // px, center to center
+  var PAIR_SPRING = 0.004;   // pull per px of stretch past PAIR_REST
+  var PAIR_MAX_PULL = 0.25;
+  var PAIR_LEASH = 120;      // px; the leash reels partners back inside this
+  var PAIR_LEASH_EASE = 0.2; // fraction of the excess reeled in per frame
 
   function stepBoidsPair(r, partner, w, h) {
     // simplified Boids within a pair only; different pairs do not coordinate
     var dx = partner.x - r.x, dy = partner.y - r.y;
     var d = Math.hypot(dx, dy) || 1;
 
-    // cohesion
-    r.vx += (dx / d) * 0.035;
-    r.vy += (dy / d) * 0.035;
+    // cohesion: a spring, so a partner that drifts away is pulled back harder
+    if (d > PAIR_REST) {
+      var pull = Math.min(PAIR_MAX_PULL, (d - PAIR_REST) * PAIR_SPRING);
+      r.vx += (dx / d) * pull;
+      r.vy += (dy / d) * pull;
+    }
 
     // separation
     if (d < 46) { r.vx -= (dx / d) * 0.08; r.vy -= (dy / d) * 0.08; }
@@ -1040,7 +1087,7 @@
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
     else if (sp < min && sp > 0.001) { r.vx = r.vx / sp * min; r.vy = r.vy / sp * min; }
     r.x += r.vx; r.y += r.vy;
-    wrap(r, w, h);
+    contain(r, w, h);
 
     // the vehicle faces the way it is driving
     r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
@@ -1075,7 +1122,32 @@
         b.vx += ux * push * SEPARATION_DRIFT; b.vy += uy * push * SEPARATION_DRIFT;
       }
     }
-    for (var k = 0; k < rs.length; k++) wrap(rs[k], w, h);
+    for (var k = 0; k < rs.length; k++) contain(rs[k], w, h);
+  }
+
+  // The pairing is a constraint, not just a force: it runs after separation, so
+  // however hard other robots push, partners past PAIR_LEASH are reeled back and
+  // lose the velocity that was carrying them apart. A pair never comes apart
+  // physically; noise only shows on the link (see drawPairLinks).
+  function applyPairLeash(byPair, w, h) {
+    if (state.mode !== 'entanglement' || state.phase === 'idle') return;
+    Object.keys(byPair).forEach(function (k) {
+      var p = byPair[k];
+      if (p.length < 2) return;
+      var a = p[0], b = p[1];
+      var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+      if (d <= PAIR_LEASH) return;
+      var ux = dx / d, uy = dy / d;
+      var reel = (d - PAIR_LEASH) * PAIR_LEASH_EASE / 2;
+      a.x += ux * reel; a.y += uy * reel;
+      b.x -= ux * reel; b.y -= uy * reel;
+      var apart = (b.vx - a.vx) * ux + (b.vy - a.vy) * uy;   // > 0: separating
+      if (apart > 0) {
+        a.vx += ux * apart / 2; a.vy += uy * apart / 2;
+        b.vx -= ux * apart / 2; b.vy -= uy * apart / 2;
+      }
+      contain(a, w, h); contain(b, w, h);
+    });
   }
 
   function angleDelta(from, to) {
@@ -1102,7 +1174,8 @@
 
     state.robots.forEach(function (r) {
       if (state.phase === 'super') stepSuperposition(r, w, h);
-      else if (state.phase === 'entangled') {
+      else if (state.phase === 'entangled' && state.mode === 'entanglement') {
+        // pair forces exist only here, between the two qubits of one Bell pair
         var p = byPair[r.pair];
         var partner = p && p.length === 2 ? (p[0] === r ? p[1] : p[0]) : null;
         if (partner) stepBoidsPair(r, partner, w, h);
@@ -1110,9 +1183,10 @@
       } else if (state.phase === 'measured') stepMeasured(r);
     });
 
-    // Positions are final for this frame only after separation has resolved, so
-    // it runs before the trail records where each robot ended up.
+    // Positions are final for this frame only after separation and the pair
+    // leash have resolved, so they run before the trail records each robot.
     applySeparation(w, h);
+    applyPairLeash(byPair, w, h);
 
     state.robots.forEach(function (r) {
       if (state.phase !== 'idle') {
@@ -1188,7 +1262,8 @@
     if ('gate' in o) $('dGate').textContent = o.gate.toUpperCase();
     if ('prob' in o) $('dProb').textContent = o.prob === null ? '—' : o.prob.toFixed(3);
     if ('angle' in o) $('dAngle').textContent = o.angle === null ? '—' : o.angle + '°';
-    if ('ideal' in o) $('dIdeal').textContent = o.ideal === null ? '—' : o.ideal + '°';
+    if ('ideal' in o) $('dIdeal').textContent = o.ideal === null ? '—'
+      : typeof o.ideal === 'string' ? o.ideal : o.ideal + '°';
     if ('error' in o) $('dError').textContent = o.error === null ? '—' : o.error + '°';
     if ('noise' in o) $('dNoise').textContent = o.noise.toFixed(2);
     if ('shots' in o) $('dShots').textContent = o.shots === null ? '—' : o.shots;
@@ -1293,11 +1368,8 @@
       hideLoading();
       if (state.phase === 'idle') return;   // reset while the measurement was in flight
       state.phase = 'measured';
-      state.fidelity = msg.fidelity;
       var bell = msg.mode === 'entanglement';
       var measuredGate = msg.gate || state.simGate;
-      // Bell pairs have no single ideal angle: each robot's ideal is its partner's outcome
-      var ideal = bell ? null : IDEAL[measuredGate].angle;
       var sumP = 0, sumA = 0, sumE = 0, n = msg.robots.length;
 
       msg.robots.forEach(function (rd, i) {
@@ -1305,21 +1377,35 @@
         if (!r) return;
         r.prob = rd.prob;
         r.angleDeg = rd.angle;
-        r.errorDeg = rd.error;
-        r.ghostDeg = rd.ideal_angle !== undefined ? rd.ideal_angle : ideal;
+        if (bell) {
+          // Bell pairs have no single ideal angle: each robot's ideal is its partner's outcome
+          r.ghostDeg = rd.ideal_angle;
+          r.errorDeg = rd.error;
+        } else {
+          // The backend's error compares the single-shot outcome with P × 180, so
+          // for H and SX it is 90° on every shot, even at zero noise. Compare with
+          // the outcomes the ideal circuit can actually produce instead.
+          r.ghostDeg = idealOutcomeFor(measuredGate, rd.angle);
+          r.errorDeg = Math.abs(rd.angle - r.ghostDeg);
+        }
         r.targetHeading = (rd.angle - 90) * Math.PI / 180;
-        sumP += rd.prob; sumA += rd.angle; sumE += rd.error;
+        sumP += rd.prob; sumA += rd.angle; sumE += r.errorDeg;
       });
+
+      // Bell fidelity (fraction of pairs that stayed correlated) is already right.
+      // For gates, fidelity is the fraction of robots that landed on an outcome
+      // the ideal circuit allows, for the same reason as the per-robot error.
+      state.fidelity = bell ? msg.fidelity : (n ? 1 - sumE / (n * 180) : 0);
 
       if (bell) {
         linkFlashAt = performance.now();   // flash the pair links white as they snap
         var pairText =msg.pairs_correlated + ' of ' + msg.pairs_total + (msg.pairs_total === 1 ? ' pair' : ' pairs');
-        setStatus(msg.fidelity >= 0.8
-          ? 'Measurement complete. ' + pairText + ' stayed correlated. Fidelity: ' + msg.fidelity.toFixed(3)
+        setStatus(state.fidelity >= 0.8
+          ? 'Measurement complete. ' + pairText + ' stayed correlated. Fidelity: ' + state.fidelity.toFixed(3)
           : 'High decoherence detected. Only ' + pairText + ' stayed correlated.');
       } else {
-        setStatus(msg.fidelity >= 0.8
-          ? 'Measurement complete. Fidelity: ' + msg.fidelity.toFixed(3)
+        setStatus(state.fidelity >= 0.8
+          ? 'Measurement complete. Fidelity: ' + state.fidelity.toFixed(3)
           : 'High decoherence detected. Results unreliable.');
       }
 
@@ -1327,11 +1413,11 @@
         gate: measuredGate,
         prob: n ? sumP / n : null,
         angle: n ? Math.round(sumA / n) : null,
-        ideal: ideal,
+        ideal: bell ? null : idealOutcomeLabel(measuredGate),
         error: n ? Math.round(sumE / n) : null,
         noise: state.noise,
         shots: msg.shots || state.shots,
-        fidelity: msg.fidelity
+        fidelity: state.fidelity
       });
       updateModeIndicator();
       tourEvent('measured', msg);
@@ -1730,8 +1816,8 @@
       body: function () {
         return [byLevel({
           beginner: "You just caught the spinning coin. Measuring forced each robot to pick a definite answer — the blur of possibilities collapsed into a single result, and the robot snapped to that angle. Physicists call this wavefunction collapse. The faint outline on each robot is its ghost: where it would point with no noise. Green robots landed close to it; red ones were pushed off.",
-          intermediate: "Measurement projects each qubit onto |0⟩ or |1⟩ with Born-rule probabilities — 50/50 for H. Each robot's angle is P(|1⟩) estimated over all its shots and mapped onto 0°–180°. Its faint ghost marks the ideal 90°, and its color shows the angle error, from green (on target) to red.",
-          advanced: "A computational-basis measurement applies the projectors |0⟩⟨0| and |1⟩⟨1|: outcome b occurs with probability |⟨b|ψ⟩|² and leaves the qubit in |b⟩. Each robot reports p̂ = k/N over N shots and turns to θ = int(p̂ × 180°); its ghost shows θ_ideal = 90°. Fidelity is 1 − |p̂ − p_ideal|, averaged over the swarm."
+          intermediate: "Measurement projects each qubit onto |0⟩ or |1⟩ with Born-rule probabilities — 50/50 for H. Each robot measured once, so it points at 0° (|0⟩) or 180° (|1⟩). Its faint ghost marks the nearest outcome the noiseless circuit allows — for H both are allowed, so every robot is on target — and its color shows the error, green when on target and red when noise produced an outcome the ideal circuit never would.",
+          advanced: "A computational-basis measurement applies the projectors |0⟩⟨0| and |1⟩⟨1|: outcome b occurs with probability |⟨b|ψ⟩|² and leaves the qubit in |b⟩. Each robot takes one shot and turns to θ = 180°·b; its ghost is the nearest outcome with nonzero ideal probability, so the error is 180° exactly when b is forbidden by the noiseless circuit. Fidelity is the fraction of robots with an allowed outcome — for H|0⟩ that is 1 at any ε, since depolarizing |+⟩ leaves its Z statistics unchanged."
         })];
       },
       footer: function () {
