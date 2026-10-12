@@ -1021,13 +1021,28 @@
 
   // Entangled robots bounce off the edges instead of wrapping: a wrap would put
   // one partner on the far side of the canvas and stretch the pair link across it.
+  // The walls sit BOUNCE_INSET in from the canvas edge so no robot is drawn clipped.
+  var BOUNCE_INSET = 14;
   function bounce(r, w, h) {
-    if (r.x < 0) { r.x = -r.x; r.vx = Math.abs(r.vx); }
-    if (r.x > w) { r.x = 2 * w - r.x; r.vx = -Math.abs(r.vx); }
-    if (r.y < 0) { r.y = -r.y; r.vy = Math.abs(r.vy); }
-    if (r.y > h) { r.y = 2 * h - r.y; r.vy = -Math.abs(r.vy); }
-    r.x = Math.max(0, Math.min(w, r.x));
-    r.y = Math.max(0, Math.min(h, r.y));
+    var lo = BOUNCE_INSET, hiX = w - BOUNCE_INSET, hiY = h - BOUNCE_INSET;
+    if (r.x < lo) { r.x = 2 * lo - r.x; r.vx = Math.abs(r.vx); }
+    if (r.x > hiX) { r.x = 2 * hiX - r.x; r.vx = -Math.abs(r.vx); }
+    if (r.y < lo) { r.y = 2 * lo - r.y; r.vy = Math.abs(r.vy); }
+    if (r.y > hiY) { r.y = 2 * hiY - r.y; r.vy = -Math.abs(r.vy); }
+    r.x = Math.max(lo, Math.min(hiX, r.x));
+    r.y = Math.max(lo, Math.min(hiY, r.y));
+  }
+
+  // Partners copy each other's velocity, so a bare bounce lets a pair keep
+  // steering back into a wall and slide into a corner. Turning them inward as
+  // they approach a wall keeps pairs out in the open.
+  var EDGE_MARGIN = 60;    // px from the canvas edge where the turn starts
+  var EDGE_STEER = 0.08;   // inward push at the edge, fading to 0 at the margin
+  function steerFromEdges(r, w, h) {
+    if (r.x < EDGE_MARGIN) r.vx += EDGE_STEER * (1 - r.x / EDGE_MARGIN);
+    if (r.x > w - EDGE_MARGIN) r.vx -= EDGE_STEER * (1 - (w - r.x) / EDGE_MARGIN);
+    if (r.y < EDGE_MARGIN) r.vy += EDGE_STEER * (1 - r.y / EDGE_MARGIN);
+    if (r.y > h - EDGE_MARGIN) r.vy -= EDGE_STEER * (1 - (h - r.y) / EDGE_MARGIN);
   }
 
   function contain(r, w, h) {
@@ -1081,6 +1096,8 @@
     var jvx = r.vx * cj - r.vy * sj;
     r.vy = r.vx * sj + r.vy * cj;
     r.vx = jvx;
+
+    steerFromEdges(r, w, h);
 
     // keep cruising so a balanced pair never stalls with no direction
     var sp = Math.hypot(r.vx, r.vy), max = 1.5, min = 0.6;
