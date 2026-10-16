@@ -1310,11 +1310,14 @@
   var ws = null;
 
   function connect() {
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var host = location.hostname === '127.0.0.1' || location.hostname === 'localhost'
-      ? 'localhost:8000'
-      : 'quantum-swarm-sim.onrender.com';
-    ws = new WebSocket(proto + '//' + host + '/ws');
+    // Render only serves https and answers ws:// with a redirect, which a
+    // WebSocket cannot follow, so the production backend is always wss:, even
+    // when the page itself is opened over http: or straight from file:.
+    var local = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    var url = local
+      ? (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//localhost:8000/ws'
+      : 'wss://quantum-swarm-sim.onrender.com/ws';
+    ws = new WebSocket(url);
 
     ws.onopen = function () {
       connDot.classList.add('on');
