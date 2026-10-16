@@ -751,7 +751,20 @@
 
   function rebuildRobots() {
     var list = [];
-    for (var i = 0; i < state.count; i++) list.push(makeRobot(i, state.count));
+    for (var i = 0; i < state.count; i++) {
+      var r = makeRobot(i, state.count);
+      // In entanglement mode each robot spawns beside its partner, already at
+      // the pair spacing; spawned at random the pair leash would have to drag
+      // partners across the canvas, through the other robots.
+      var mate = state.mode === 'entanglement' && i % 2 === 1 ? list[i - 1] : null;
+      if (mate) {
+        var t = Math.random() * Math.PI * 2;
+        r.x = mate.x + Math.cos(t) * PAIR_REST;
+        r.y = mate.y + Math.sin(t) * PAIR_REST;
+        r.vx = mate.vx; r.vy = mate.vy;
+      }
+      list.push(r);
+    }
     state.robots = list;
   }
 
@@ -918,7 +931,7 @@
   }
 
   function drawRobot(r) {
-    // trail; a jump longer than 40px is a wrap across the canvas edge, so break the line there
+    // trail; break the line at any jump longer than 40px rather than draw a streak across it
     if (r.trail.length > 1 && trailEnabled()) {
       ctx.beginPath();
       ctx.moveTo(r.trail[0].x, r.trail[0].y);
@@ -951,7 +964,7 @@
   var LINK_LABEL_OFFSET = 9;        // px the "Pair n" label sits off the line
   var LINK_FONT = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
-  var linkDashOffset = 0;   // advanced each frame to animate the flow
+  var linkDashOffset = 0;   // advanced each physics step to animate the flow
   var linkFlashAt = 0;      // timestamp of the last collapse, 0 when there is none
 
   // 1 at the instant of measurement, easing to 0 over LINK_FLASH_MS.
@@ -968,7 +981,6 @@
   }
 
   function drawPairLinks(byPair) {
-    linkDashOffset = (linkDashOffset + LINK_DASH_SPEED) % 1000;
     if (state.mode !== 'entanglement' || state.phase === 'idle') return;
 
     var flash = linkFlash(performance.now());
@@ -1014,13 +1026,9 @@
   }
 
   // ---------- physics ----------
-  function wrap(r, w, h) {
-    if (r.x < 0) r.x += w; if (r.x > w) r.x -= w;
-    if (r.y < 0) r.y += h; if (r.y > h) r.y -= h;
-  }
-
-  // Entangled robots bounce off the edges instead of wrapping: a wrap would put
-  // one partner on the far side of the canvas and stretch the pair link across it.
+  // Robots bounce off the edges instead of wrapping: a wrap makes a robot vanish
+  // at one edge and pop out at the other, and in entanglement it would put one
+  // partner on the far side of the canvas and stretch the pair link across it.
   // The walls sit BOUNCE_INSET in from the canvas edge so no robot is drawn clipped.
   var BOUNCE_INSET = 14;
   function bounce(r, w, h) {
@@ -1033,36 +1041,62 @@
     r.y = Math.max(lo, Math.min(hiY, r.y));
   }
 
-  // Partners copy each other's velocity, so a bare bounce lets a pair keep
-  // steering back into a wall and slide into a corner. Turning them inward as
-  // they approach a wall keeps pairs out in the open.
+  // A bare bounce lets a robot keep steering back into a wall (and partners copy
+  // each other's velocity, so a pair slides into a corner). Turning them inward
+  // as they approach a wall keeps robots out in the open.
   var EDGE_MARGIN = 60;    // px from the canvas edge where the turn starts
   var EDGE_STEER = 0.08;   // inward push at the edge, fading to 0 at the margin
-  function steerFromEdges(r, w, h) {
-    if (r.x < EDGE_MARGIN) r.vx += EDGE_STEER * (1 - r.x / EDGE_MARGIN);
-    if (r.x > w - EDGE_MARGIN) r.vx -= EDGE_STEER * (1 - (w - r.x) / EDGE_MARGIN);
-    if (r.y < EDGE_MARGIN) r.vy += EDGE_STEER * (1 - r.y / EDGE_MARGIN);
-    if (r.y > h - EDGE_MARGIN) r.vy -= EDGE_STEER * (1 - (h - r.y) / EDGE_MARGIN);
+  // Superposition robots drive faster than pairs and get a random kick every
+  // frame, so they need a stronger, earlier turn to clear the wall.
+  var EDGE_MARGIN_FAST = 90, EDGE_STEER_FAST = 0.2;
+  function steerFromEdges(r, w, h, margin, steer) {
+    margin = margin || EDGE_MARGIN; steer = steer || EDGE_STEER;
+    if (r.x < margin) r.vx += steer * (1 - r.x / margin);
+    if (r.x > w - margin) r.vx -= steer * (1 - (w - r.x) / margin);
+    if (r.y < margin) r.vy += steer * (1 - r.y / margin);
+    if (r.y > h - margin) r.vy -= steer * (1 - (h - r.y) / margin);
   }
 
-  function contain(r, w, h) {
-    if (state.mode === 'entanglement') bounce(r, w, h);
-    else wrap(r, w, h);
+  function contain(r, w, h) { bounce(r, w, h); }
+
+  // Collision avoidance: a robot turns aside from any neighbour that is close
+  // and closing in, so robots swerve past each other instead of driving into
+  // contact and being shoved apart. It only ever pushes away, so it adds no
+  // cohesion or alignment. `skip` is an entangled partner, whose spacing the
+  // pair forces handle.
+  var AVOID_RADIUS = 80;    // px, center to center, where a robot starts to turn
+  var AVOID_STEER = 0.35;   // push away at contact, fading to 0 at AVOID_RADIUS
+
+  function avoidNeighbours(r, skip) {
+    var rs = state.robots;
+    for (var i = 0; i < rs.length; i++) {
+      var o = rs[i];
+      if (o === r || o === skip) continue;
+      var dx = o.x - r.x, dy = o.y - r.y, d = Math.hypot(dx, dy);
+      if (d >= AVOID_RADIUS || d < 0.001) continue;
+      var ux = dx / d, uy = dy / d;
+      if ((o.vx - r.vx) * ux + (o.vy - r.vy) * uy >= 0) continue;   // already moving apart
+      var k = AVOID_STEER * (1 - d / AVOID_RADIUS);
+      r.vx -= ux * k; r.vy -= uy * k;
+    }
   }
 
   // Unentangled qubits share no state, so in superposition each robot wanders on
-  // its own: no cohesion, no alignment, nothing that reads its neighbours. The
-  // only interaction is the global separation below, which just prevents overlap.
+  // its own: no cohesion, no alignment. Its neighbours matter only as obstacles
+  // to steer around (avoidNeighbours) and, as a last resort, the global
+  // separation below, which prevents overlap.
   function stepSuperposition(r, w, h) {
     r.wander += (Math.random() - 0.5) * 0.45;
     r.vx += Math.cos(r.wander) * 0.09;
     r.vy += Math.sin(r.wander) * 0.09;
+    avoidNeighbours(r, null);
+    steerFromEdges(r, w, h, EDGE_MARGIN_FAST, EDGE_STEER_FAST);
     var sp = Math.hypot(r.vx, r.vy), max = 1.9;
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
     r.x += r.vx; r.y += r.vy;
     contain(r, w, h);
-    // the vehicle now has an obvious front, so steer it to face where it is driving
-    r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15 + (Math.random() - 0.5) * 0.08;
+    // the vehicle has an obvious front, so steer it to face where it is driving
+    r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
   }
 
   // Entangled partners sit about PAIR_REST apart. Past that a spring pulls them
@@ -1072,6 +1106,7 @@
   var PAIR_MAX_PULL = 0.25;
   var PAIR_LEASH = 120;      // px; the leash reels partners back inside this
   var PAIR_LEASH_EASE = 0.2; // fraction of the excess reeled in per frame
+  var PAIR_LEASH_STEP = 1.5; // px per robot per frame at most, so the reel never jumps
 
   function stepBoidsPair(r, partner, w, h) {
     // simplified Boids within a pair only; different pairs do not coordinate
@@ -1097,6 +1132,7 @@
     r.vy = r.vx * sj + r.vy * cj;
     r.vx = jvx;
 
+    avoidNeighbours(r, partner);   // steer around robots from other pairs
     steerFromEdges(r, w, h);
 
     // keep cruising so a balanced pair never stalls with no direction
@@ -1155,7 +1191,7 @@
       var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
       if (d <= PAIR_LEASH) return;
       var ux = dx / d, uy = dy / d;
-      var reel = (d - PAIR_LEASH) * PAIR_LEASH_EASE / 2;
+      var reel = Math.min(PAIR_LEASH_STEP, (d - PAIR_LEASH) * PAIR_LEASH_EASE / 2);
       a.x += ux * reel; a.y += uy * reel;
       b.x -= ux * reel; b.y -= uy * reel;
       var apart = (b.vx - a.vx) * ux + (b.vy - a.vy) * uy;   // > 0: separating
@@ -1182,12 +1218,29 @@
     r.x += r.vx; r.y += r.vy;
   }
 
-  function frame() {
-    var w = viewW(), h = viewH();
-    ctx.clearRect(0, 0, w, h);
+  // ---------- frame loop ----------
+  // The physics is tuned in steps of 1/60 s, so it runs on a fixed 60 Hz clock
+  // whatever the display's refresh rate: a 120 Hz screen draws about two frames
+  // per step and a 30 Hz one runs two steps per frame, at the same speed. Each
+  // frame draws the robots between their last two steps (see drawWorld), so
+  // motion stays smooth on fast screens.
+  var STEP_MS = 1000 / 60;
+  var MAX_STEPS_PER_FRAME = 5;   // after a long stall (e.g. a background tab), drop time instead of racing to catch up
+  var lastFrameAt = null, stepBacklog = 0;
 
+  function groupPairs() {
     var byPair = {};
     state.robots.forEach(function (r) { (byPair[r.pair] = byPair[r.pair] || []).push(r); });
+    return byPair;
+  }
+
+  function stepWorld(w, h) {
+    var byPair = groupPairs();
+    linkDashOffset = (linkDashOffset + LINK_DASH_SPEED) % 1000;
+
+    state.robots.forEach(function (r) {
+      r.prevX = r.x; r.prevY = r.y; r.prevHeading = r.heading;
+    });
 
     state.robots.forEach(function (r) {
       if (state.phase === 'super') stepSuperposition(r, w, h);
@@ -1200,7 +1253,7 @@
       } else if (state.phase === 'measured') stepMeasured(r);
     });
 
-    // Positions are final for this frame only after separation and the pair
+    // Positions are final for this step only after separation and the pair
     // leash have resolved, so they run before the trail records each robot.
     applySeparation(w, h);
     applyPairLeash(byPair, w, h);
@@ -1211,9 +1264,41 @@
         if (r.trail.length > 26) r.trail.shift();
       }
     });
+  }
 
-    drawPairLinks(byPair);
+  // t: how far the clock is between the last step (0) and the next (1). Every
+  // drawing helper reads r.x, r.y and r.heading, so those are set to the
+  // in-between pose for the draw and restored straight after.
+  function drawWorld(w, h, t) {
+    ctx.clearRect(0, 0, w, h);
+    var saved = state.robots.map(function (r) {
+      var pose = { x: r.x, y: r.y, heading: r.heading };
+      if (r.prevX !== undefined) {
+        r.x = r.prevX + (pose.x - r.prevX) * t;
+        r.y = r.prevY + (pose.y - r.prevY) * t;
+        r.heading = r.prevHeading + angleDelta(r.prevHeading, pose.heading) * t;
+      }
+      return pose;
+    });
+    drawPairLinks(groupPairs());
     state.robots.forEach(drawRobot);
+    state.robots.forEach(function (r, i) {
+      r.x = saved[i].x; r.y = saved[i].y; r.heading = saved[i].heading;
+    });
+  }
+
+  function frame(now) {
+    var w = viewW(), h = viewH();
+    stepBacklog += lastFrameAt === null ? STEP_MS : now - lastFrameAt;
+    lastFrameAt = now;
+    var steps = 0;
+    while (stepBacklog >= STEP_MS && steps < MAX_STEPS_PER_FRAME) {
+      stepWorld(w, h);
+      stepBacklog -= STEP_MS;
+      steps++;
+    }
+    if (steps === MAX_STEPS_PER_FRAME) stepBacklog = Math.min(stepBacklog, STEP_MS);
+    drawWorld(w, h, stepBacklog / STEP_MS);
     requestAnimationFrame(frame);
   }
 
