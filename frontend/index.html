@@ -1322,7 +1322,6 @@
     ws.onopen = function () {
       connDot.classList.add('on');
       connText.textContent = 'connected';
-      setControlsEnabled(true);
     };
 
     ws.onclose = function () {
@@ -1332,7 +1331,6 @@
         hideLoading();
         setStatus('Connection lost while the circuit was running — retrying.');
       }
-      setControlsEnabled(false);
       setTimeout(connect, 2000);
     };
 
@@ -1349,13 +1347,6 @@
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     obj.knowledge_level = state.level;
     ws.send(JSON.stringify(obj));
-  }
-
-  function setControlsEnabled(on) {
-    btnSimulate.disabled = !on;
-    // Measure stays clickable while idle so it can tell the user to simulate first
-    btnMeasure.disabled = !on;
-    btnReset.disabled = !on;
   }
 
   function handleMessage(msg) {
@@ -1381,7 +1372,6 @@
                 shots: msg.shots || state.shots });
       refreshExplanation();
       updateModeIndicator();
-      setControlsEnabled(true);
       tourEvent('superState', msg);
 
     } else if (msg.type === 'measurement_result') {
@@ -1464,7 +1454,6 @@
                 noise: msg.noise_rate, fidelity: null });
       refreshExplanation();
       updateModeIndicator();
-      setControlsEnabled(true);
       tourEvent('entState', msg);
 
     } else if (msg.type === 'error') {
@@ -1524,7 +1513,6 @@
     setData({ gate: state.gate, prob: null, angle: null, ideal: IDEAL[state.gate].angle,
               error: null, noise: state.noise, fidelity: null });
     updateModeIndicator();
-    setControlsEnabled(ws && ws.readyState === WebSocket.OPEN);
   }
 
   // Entanglement needs a pair of qubits, so that mode requires at least 2 robots.
@@ -2198,7 +2186,6 @@
   refreshExplanation();
   updateModeIndicator();
   setData({ gate: 'h', ideal: IDEAL.h.angle });
-  setControlsEnabled(false);
   connect();
   requestAnimationFrame(frame);
 })();
