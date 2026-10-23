@@ -232,6 +232,8 @@
     font-weight: 600;
   }
 
+  #statusTip { margin: -4px 0 8px; font-size: 11.5px; color: var(--muted); }
+
   #explanationText, #shotsText { margin: 0; color: #c7d1e8; font-size: 13.5px; }
 
   .sub-h {
@@ -623,6 +625,7 @@
       <button data-level="advanced">Advanced</button>
     </div>
     <div id="statusLabel">Select a gate and press S or Simulate to begin.</div>
+    <div id="statusTip">Tip: click a robot to measure it.</div>
     <p id="explanationText"></p>
     <h3 class="sub-h">Shots</h3>
     <p id="shotsText"></p>
@@ -695,7 +698,8 @@
     count: 4,
     level: 'beginner',
     simGate: 'h',                // gate the robots were actually simulated with
-    loading: null,               // null | 'simulate' | 'measure' — request in flight
+    loading: null,               // null | 'simulate' | 'measure' | 'click' — request in flight
+    click: null,                 // robots a click measurement applies to, while it is in flight
     fidelity: null,
     robots: [],
     pairs: []
@@ -741,6 +745,7 @@
       targetHeading: null,                     // set on measurement
       wander: Math.random() * Math.PI * 2,
       pair: Math.floor(id / 2),
+      measured: false,      // collapsed, by the Measure button or by a click on it
       prob: null,
       angleDeg: null,
       errorDeg: null,
@@ -766,12 +771,14 @@
       list.push(r);
     }
     state.robots = list;
+    state.click = null;   // a click result in flight would point at the old robots
   }
 
   // ---------- rendering ----------
+  // Color is per robot: a measured robot shows its error even while others are
+  // still in superposition or entangled.
   function colorFor(r) {
-    if (state.phase === 'entangled') return '#ffc65c';
-    if (state.phase === 'measured' && r.errorDeg !== null) {
+    if (r.measured && r.errorDeg !== null) {
       // green at zero error, ramping to red at the largest possible error (180°)
       var t = Math.min(1, r.errorDeg / 180);
       var cr = Math.round(74 + (255 - 74) * t);
@@ -779,6 +786,7 @@
       var cb = Math.round(128 + (94 - 128) * t);
       return 'rgb(' + cr + ',' + cg + ',' + cb + ')';
     }
+    if (state.phase === 'entangled' && !r.measured) return '#ffc65c';
     return '#4da3ff';
   }
 
@@ -965,12 +973,13 @@
   var LINK_FONT = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
   var linkDashOffset = 0;   // advanced each physics step to animate the flow
-  var linkFlashAt = 0;      // timestamp of the last collapse, 0 when there is none
+  var linkFlashAt = 0;      // timestamp of the last full collapse, 0 when there is none
+  var pairFlashAt = {};     // pair id -> timestamp of a click that collapsed only that pair
 
   // 1 at the instant of measurement, easing to 0 over LINK_FLASH_MS.
-  function linkFlash(now) {
-    if (!linkFlashAt) return 0;
-    var t = (now - linkFlashAt) / LINK_FLASH_MS;
+  function linkFlash(now, at) {
+    if (!at) return 0;
+    var t = (now - at) / LINK_FLASH_MS;
     return t >= 0 && t < 1 ? 1 - t : 0;
   }
 
@@ -983,21 +992,14 @@
   function drawPairLinks(byPair) {
     if (state.mode !== 'entanglement' || state.phase === 'idle') return;
 
-    var flash = linkFlash(performance.now());
+    var now = performance.now();
+    var allFlash = linkFlash(now, linkFlashAt);
     var c = linkColor();
     // past the decoherence threshold the link thins out to faint dots
     var decohered = state.noise > LINK_DECOHERE_NOISE;
     var alpha = LINK_ALPHA * (decohered ? 1 - (state.noise - LINK_DECOHERE_NOISE) * 1.2 : 1);
 
-    // the collapse flash washes the line toward opaque white for ~0.3s
-    var r = Math.round(c.r + (255 - c.r) * flash);
-    var g = Math.round(c.g + (255 - c.g) * flash);
-    var b = Math.round(c.b + (255 - c.b) * flash);
-    var a = alpha + (1 - alpha) * flash;
-
     ctx.save();
-    ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(3) + ')';
-    ctx.lineWidth = 1 + flash * 1.2;
     ctx.setLineDash(decohered ? [1.5, 7] : [7, 6]);
     ctx.lineDashOffset = -linkDashOffset;
     ctx.font = LINK_FONT;
@@ -1008,6 +1010,15 @@
       var p = byPair[k];
       if (p.length < 2) return;
       var ax = p[0].x, ay = p[0].y, bx = p[1].x, by = p[1].y;
+
+      // the collapse flash washes the line toward opaque white for ~0.3s
+      var flash = Math.max(allFlash, linkFlash(now, pairFlashAt[k]));
+      var r = Math.round(c.r + (255 - c.r) * flash);
+      var g = Math.round(c.g + (255 - c.g) * flash);
+      var b = Math.round(c.b + (255 - c.b) * flash);
+      var a = alpha + (1 - alpha) * flash;
+      ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(3) + ')';
+      ctx.lineWidth = 1 + flash * 1.2;
 
       ctx.beginPath();
       ctx.moveTo(ax, ay);
@@ -1059,11 +1070,11 @@
 
   function contain(r, w, h) { bounce(r, w, h); }
 
-  // Collision avoidance: a robot turns aside from any neighbour that is close
-  // and closing in, so robots swerve past each other instead of driving into
-  // contact and being shoved apart. It only ever pushes away, so it adds no
-  // cohesion or alignment. `skip` is an entangled partner, whose spacing the
-  // pair forces handle.
+  // Collision avoidance for entangled pairs: a robot turns aside from any robot
+  // of another pair that is close and closing in, so pairs swerve past each
+  // other instead of tangling their links. It only ever pushes away, so it adds
+  // no cohesion or alignment. `skip` is the robot's partner, whose spacing the
+  // pair forces handle. Superposition robots don't use it (see stepSuperposition).
   var AVOID_RADIUS = 80;    // px, center to center, where a robot starts to turn
   var AVOID_STEER = 0.35;   // push away at contact, fading to 0 at AVOID_RADIUS
 
@@ -1082,14 +1093,12 @@
   }
 
   // Unentangled qubits share no state, so in superposition each robot wanders on
-  // its own: no cohesion, no alignment. Its neighbours matter only as obstacles
-  // to steer around (avoidNeighbours) and, as a last resort, the global
-  // separation below, which prevents overlap.
+  // its own: no cohesion, no alignment, no steering around neighbours. The only
+  // contact between robots is the overlap separation below, when bodies touch.
   function stepSuperposition(r, w, h) {
     r.wander += (Math.random() - 0.5) * 0.45;
     r.vx += Math.cos(r.wander) * 0.09;
     r.vy += Math.sin(r.wander) * 0.09;
-    avoidNeighbours(r, null);
     steerFromEdges(r, w, h, EDGE_MARGIN_FAST, EDGE_STEER_FAST);
     var sp = Math.hypot(r.vx, r.vy), max = 1.9;
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
@@ -1146,28 +1155,31 @@
     r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
   }
 
-  // Global separation: no two robots share space, in any mode. The push is
-  // deliberately soft — a fraction of the overlap per frame — so crowded robots
-  // ease apart over several frames instead of snapping to a legal position.
-  var SEPARATION_RADIUS = 30;   // px, center to center
-  var SEPARATION_EASE = 0.22;   // fraction of the overlap resolved per frame
-  var SEPARATION_DRIFT = 0.6;   // how much of the push carries into velocity
+  // Separation acts only when two bodies actually overlap: centers closer than
+  // one body length. The push is zero at first contact and grows with the
+  // square of the overlap, so robots that brush past each other barely react
+  // and only deep overlaps are eased apart, over several frames.
+  var SEPARATION_EASE = 0.2;    // fraction of the overlap resolved per frame at full overlap
+  var SEPARATION_DRIFT = 0.3;   // how much of the push carries into velocity
+
+  function bodyLength() { return shapeHalfLength() * 2 * vehicleScale(); }
 
   function applySeparation(w, h) {
-    var rs = state.robots;
+    var rs = state.robots, reach = bodyLength();
     for (var i = 0; i < rs.length; i++) {
       for (var j = i + 1; j < rs.length; j++) {
         var a = rs[i], b = rs[j];
         var dx = b.x - a.x, dy = b.y - a.y;
         var d = Math.hypot(dx, dy);
-        if (d >= SEPARATION_RADIUS) continue;
+        if (d >= reach) continue;
         if (d < 0.001) {
           // exactly coincident: no direction to separate along, so pick one
           var t = Math.random() * Math.PI * 2;
           dx = Math.cos(t); dy = Math.sin(t); d = 1;
         }
         var ux = dx / d, uy = dy / d;
-        var push = (SEPARATION_RADIUS - d) * SEPARATION_EASE;
+        var overlap = reach - d;
+        var push = overlap * SEPARATION_EASE * (overlap / reach);
         a.x -= ux * push; a.y -= uy * push;
         b.x += ux * push; b.y += uy * push;
         // carrying part of the push into velocity keeps them drifting apart
@@ -1234,6 +1246,11 @@
     return byPair;
   }
 
+  function partnerOf(r, byPair) {
+    var p = byPair[r.pair];
+    return p && p.length === 2 ? (p[0] === r ? p[1] : p[0]) : null;
+  }
+
   function stepWorld(w, h) {
     var byPair = groupPairs();
     linkDashOffset = (linkDashOffset + LINK_DASH_SPEED) % 1000;
@@ -1242,15 +1259,17 @@
       r.prevX = r.x; r.prevY = r.y; r.prevHeading = r.heading;
     });
 
+    // Each robot moves by its own state, so a robot measured by a click holds
+    // its result while the rest keep wandering or stay paired.
     state.robots.forEach(function (r) {
-      if (state.phase === 'super') stepSuperposition(r, w, h);
-      else if (state.phase === 'entangled' && state.mode === 'entanglement') {
+      if (state.phase === 'idle') return;
+      if (r.measured) { stepMeasured(r); return; }
+      if (state.mode === 'entanglement') {
         // pair forces exist only here, between the two qubits of one Bell pair
-        var p = byPair[r.pair];
-        var partner = p && p.length === 2 ? (p[0] === r ? p[1] : p[0]) : null;
-        if (partner) stepBoidsPair(r, partner, w, h);
+        var partner = partnerOf(r, byPair);
+        if (partner && !partner.measured) stepBoidsPair(r, partner, w, h);
         else stepSuperposition(r, w, h);
-      } else if (state.phase === 'measured') stepMeasured(r);
+      } else stepSuperposition(r, w, h);
     });
 
     // Positions are final for this step only after separation and the pair
@@ -1356,7 +1375,33 @@
       entangled: 'Entangled',
       measured: 'Measured'
     };
-    modeIndicator.textContent = map[state.phase] || 'Idle';
+    var text = map[state.phase] || 'Idle';
+    var n = state.robots.filter(function (r) { return r.measured; }).length;
+    if ((state.phase === 'super' || state.phase === 'entangled') && n) text += ' · ' + n + ' measured';
+    modeIndicator.textContent = text;
+  }
+
+  // After a click measures or resets robots, the phase follows them:
+  // 'measured' once every robot that can be measured has collapsed, otherwise
+  // the prepared state of the current mode. (An unpaired robot in entanglement
+  // mode is never measured by a click, so it doesn't count.)
+  function syncPhase() {
+    if (state.phase === 'idle') return;
+    var byPair = groupPairs();
+    var open = state.robots.filter(function (r) {
+      return !r.measured && (state.mode !== 'entanglement' || partnerOf(r, byPair));
+    });
+    state.phase = !open.length ? 'measured' : state.mode === 'entanglement' ? 'entangled' : 'super';
+    updateModeIndicator();
+  }
+
+  // Fidelity over the robots measured so far: the fraction that landed on an
+  // outcome the ideal circuit allows (for Bell pairs, that stayed correlated).
+  function measuredFidelity() {
+    var ms = state.robots.filter(function (r) { return r.measured && r.errorDeg !== null; });
+    if (!ms.length) return null;
+    var sumE = ms.reduce(function (s, r) { return s + r.errorDeg; }, 0);
+    return 1 - sumE / (ms.length * 180);
   }
 
   // ---------- data panel ----------
@@ -1412,6 +1457,7 @@
     ws.onclose = function () {
       connDot.classList.remove('on');
       connText.textContent = 'disconnected — retrying';
+      state.click = null;
       if (state.loading) {
         hideLoading();
         setStatus('Connection lost while the circuit was running — retrying.');
@@ -1450,6 +1496,7 @@
         r.ghostDeg = null;
         r.targetHeading = null;
         r.errorDeg = null;
+        r.measured = false;
       });
       setStatus('Robots are in superposition — state undefined.');
       setData({ gate: msg.gate, prob: null, angle: null, ideal: msg.ideal_angle,
@@ -1460,30 +1507,21 @@
       tourEvent('superState', msg);
 
     } else if (msg.type === 'measurement_result') {
+      var click = state.click;
+      state.click = null;
       hideLoading();
       if (state.phase === 'idle') return;   // reset while the measurement was in flight
+      if (click) { applyClickResult(click, msg); return; }
       state.phase = 'measured';
       var bell = msg.mode === 'entanglement';
       var measuredGate = msg.gate || state.simGate;
       var sumP = 0, sumA = 0, sumE = 0, n = msg.robots.length;
 
+      state.robots.forEach(function (r) { r.measured = true; });
       msg.robots.forEach(function (rd, i) {
         var r = state.robots[rd.id !== undefined ? rd.id : i];
         if (!r) return;
-        r.prob = rd.prob;
-        r.angleDeg = rd.angle;
-        if (bell) {
-          // Bell pairs have no single ideal angle: each robot's ideal is its partner's outcome
-          r.ghostDeg = rd.ideal_angle;
-          r.errorDeg = rd.error;
-        } else {
-          // The backend's error compares the single-shot outcome with P × 180, so
-          // for H and SX it is 90° on every shot, even at zero noise. Compare with
-          // the outcomes the ideal circuit can actually produce instead.
-          r.ghostDeg = idealOutcomeFor(measuredGate, rd.angle);
-          r.errorDeg = Math.abs(rd.angle - r.ghostDeg);
-        }
-        r.targetHeading = (rd.angle - 90) * Math.PI / 180;
+        applyOutcome(r, rd, bell, measuredGate);
         sumP += rd.prob; sumA += rd.angle; sumE += r.errorDeg;
       });
 
@@ -1523,6 +1561,7 @@
       state.noise = msg.noise_rate;
       state.pairs = msg.pairs;
       if (!state.robots.length) rebuildRobots();
+      state.robots.forEach(function (r) { r.measured = false; });
 
       msg.pairs.forEach(function (p) {
         var a = state.robots[p.a.id], b = state.robots[p.b.id];
@@ -1542,9 +1581,70 @@
       tourEvent('entState', msg);
 
     } else if (msg.type === 'error') {
+      state.click = null;
       hideLoading();
       setStatus('Error: ' + msg.message);
     }
+  }
+
+  // Snap one robot to a measured outcome.
+  function applyOutcome(r, rd, bell, gate) {
+    r.measured = true;
+    r.prob = rd.prob;
+    r.angleDeg = rd.angle;
+    if (bell) {
+      // Bell pairs have no single ideal angle: each robot's ideal is its partner's outcome
+      r.ghostDeg = rd.ideal_angle;
+      r.errorDeg = rd.error;
+    } else {
+      // The backend's error compares the single-shot outcome with P × 180, so
+      // for H and SX it is 90° on every shot, even at zero noise. Compare with
+      // the outcomes the ideal circuit can actually produce instead.
+      r.ghostDeg = idealOutcomeFor(gate, rd.angle);
+      r.errorDeg = Math.abs(rd.angle - r.ghostDeg);
+    }
+    r.targetHeading = (rd.angle - 90) * Math.PI / 180;
+  }
+
+  // A click measures one robot (or one Bell pair) with the ordinary measure
+  // message, sized to just that robot or pair, so result i belongs to
+  // click.robots[i]. Everything else is left as it was. No tour event fires,
+  // so the tour still advances only on the Measure button and Space.
+  function applyClickResult(click, msg) {
+    var bell = msg.mode === 'entanglement';
+    var gate = msg.gate || state.simGate;
+    msg.robots.forEach(function (rd, i) {
+      var r = click.robots[i];
+      if (r) applyOutcome(r, rd, bell, gate);
+    });
+    syncPhase();
+    state.fidelity = measuredFidelity();
+
+    var first = click.robots[0], rd0 = msg.robots[0];
+    if (!first || !rd0) return;
+    if (bell) {
+      pairFlashAt[first.pair] = performance.now();
+      var correlated = msg.pairs_correlated === 1;
+      setStatus('Pair ' + (first.pair + 1) + ' measured — ' + (correlated
+        ? 'both robots landed on ' + rd0.angle + '°. Other pairs stay entangled.'
+        : 'decoherence broke the correlation. Other pairs stay entangled.'));
+    } else {
+      setStatus('Robot ' + (first.id + 1) + ' measured: ' + rd0.angle + '°. The other robots are still in superposition.');
+    }
+    var n = msg.robots.length, sumP = 0, sumA = 0, sumE = 0;
+    msg.robots.forEach(function (rd, i) {
+      sumP += rd.prob; sumA += rd.angle; sumE += click.robots[i] ? click.robots[i].errorDeg : 0;
+    });
+    setData({
+      gate: gate,
+      prob: sumP / n,
+      angle: Math.round(sumA / n),
+      ideal: bell ? null : idealOutcomeLabel(gate),
+      error: Math.round(sumE / n),
+      noise: state.noise,
+      shots: 1,
+      fidelity: state.fidelity
+    });
   }
 
   // ---------- actions ----------
@@ -1588,11 +1688,71 @@
     tourEvent('measure');
   }
 
+  // Click a robot: measure it if it is still in superposition or entangled,
+  // reset it if it is already measured.
+  function clickRobot(r) {
+    if (state.phase === 'idle') {
+      setStatus('Nothing to measure yet — press S or Simulate first.');
+      return;
+    }
+    if (state.loading) return;   // a circuit is already running
+    if (r.measured) { resetRobot(r); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setStatus('Not connected to the backend — cannot measure yet.');
+      return;
+    }
+
+    // The ordinary measure message, sized to the clicked robot (or its pair):
+    // the backend measures robot 0 (or pair 0) once, and that one outcome is
+    // applied to the clicked robot(s) when it comes back.
+    var group = [r];
+    if (state.mode === 'entanglement') {
+      var partner = partnerOf(r, groupPairs());
+      if (!partner) {
+        setStatus('Robot ' + (r.id + 1) + ' has no partner, so it is not entangled. Add a robot to pair it.');
+        return;
+      }
+      group = r.id < partner.id ? [r, partner] : [partner, r];
+    }
+    state.click = { robots: group };
+    state.loading = 'click';   // no overlay: the rest of the swarm stays in view
+    setStatus(state.mode === 'entanglement'
+      ? 'Measuring pair ' + (r.pair + 1) + '...'
+      : 'Measuring robot ' + (r.id + 1) + '...');
+    send({ type: 'measure', gate: state.simGate, noise_rate: state.noise, num_robots: group.length,
+           shots: state.shots, mode: state.mode });
+  }
+
+  // Return a measured robot to superposition. Robot qubits are independent, so
+  // in superposition only that robot goes back; in entanglement its partner
+  // collapsed with it, so the pair is re-entangled together. The next click
+  // runs a fresh circuit, so nothing needs to be sent to the backend here.
+  function resetRobot(r) {
+    var partner = state.mode === 'entanglement' ? partnerOf(r, groupPairs()) : null;
+    var group = partner ? [r, partner] : [r];
+    // a measured robot has all but stopped, so start it moving again (a pair together)
+    var t = Math.random() * Math.PI * 2;
+    group.forEach(function (m) {
+      m.measured = false;
+      m.prob = null; m.angleDeg = null; m.errorDeg = null; m.ghostDeg = null; m.targetHeading = null;
+      m.vx = Math.cos(t) * 1.2; m.vy = Math.sin(t) * 1.2;
+      m.wander = t;
+    });
+    syncPhase();
+    state.fidelity = measuredFidelity();
+    setData({ prob: null, angle: null, error: null, fidelity: state.fidelity });
+    setStatus(partner
+      ? 'Pair ' + (r.pair + 1) + ' is entangled again.'
+      : 'Robot ' + (r.id + 1) + ' is back in superposition.');
+  }
+
   function doReset() {
     state.phase = 'idle';
     hideLoading();
+    state.click = null;
     state.fidelity = null;
     linkFlashAt = 0;
+    pairFlashAt = {};
     rebuildRobots();
     setStatus('Select a gate and press S or Simulate to begin.');
     setData({ gate: state.gate, prob: null, angle: null, ideal: IDEAL[state.gate].angle,
@@ -2081,6 +2241,7 @@
 
   function renderTour() {
     tourIndicator.hidden = !tour.active;
+    $('statusTip').hidden = tour.active;   // the click tip is for free exploration only
     btnTourLabel.textContent = tour.active ? 'Exit Tour' : 'Start Tour';
     if (!tour.active) {
       tourOverlay.classList.remove('on');
@@ -2196,6 +2357,29 @@
   countRange.addEventListener('input', function () { setCount(parseInt(countRange.value, 10)); });
   noiseInput.addEventListener('input', function () { setNoise(parseFloat(noiseInput.value)); });
   shotsInput.addEventListener('input', function () { setShotsExp(parseInt(shotsInput.value, 10)); });
+
+  // Canvas: click a robot to measure it, click it again to reset it.
+  var HIT_RADIUS = 20;   // px from a robot's center that still counts as a hit
+
+  function robotAt(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left, y = e.clientY - rect.top;
+    var best = null, bestD = HIT_RADIUS;
+    state.robots.forEach(function (r) {
+      var d = Math.hypot(r.x - x, r.y - y);
+      if (d <= bestD) { best = r; bestD = d; }
+    });
+    return best;
+  }
+
+  canvas.addEventListener('click', function (e) {
+    var r = robotAt(e);
+    if (r) clickRobot(r);
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    canvas.style.cursor = state.phase !== 'idle' && robotAt(e) ? 'pointer' : '';
+  });
+  canvas.addEventListener('mouseleave', function () { canvas.style.cursor = ''; });
 
   btnSimulate.addEventListener('click', doSimulate);
   btnMeasure.addEventListener('click', doMeasure);
