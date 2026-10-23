@@ -77,29 +77,6 @@ def validate_gate(value):
     return value if value in VALID_GATES else 'h'
 
 
-def validate_index(value, limit, name):
-    try:
-        index = int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid {name}: {value!r}")
-    if not 0 <= index < limit:
-        raise ValueError(f"{name} out of range: {index}")
-    return index
-
-
-def robot_noise_rates(message, num_robots, default):
-    """Per-robot noise rates for a full measurement. The frontend sends
-    `robot_noise` so a robot the user disturbed is measured at its local noise
-    level; any robot without an entry uses the session noise rate."""
-    rates = message.get("robot_noise")
-    if not isinstance(rates, list):
-        return [default] * num_robots
-    return [
-        clamp_noise(rates[i]) if i < len(rates) and rates[i] is not None else default
-        for i in range(num_robots)
-    ]
-
-
 class SessionState:
     """Per-connection simulation state, so 'measure' knows what was simulated."""
 
@@ -130,10 +107,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     await handle_simulate(websocket, state, message)
                 elif message_type == "measure":
                     await handle_measure(websocket, state, message)
-                elif message_type == "measure_robot":
-                    await handle_measure_robot(websocket, state, message)
-                elif message_type == "measure_pair":
-                    await handle_measure_pair(websocket, state, message)
                 elif message_type == "entangle":
                     await handle_entangle(websocket, state, message)
                 elif message_type == "set_noise":
@@ -192,10 +165,8 @@ async def handle_measure(websocket, state, message):
     if message.get("mode") in ("superposition", "entanglement"):
         state.mode = message["mode"]
 
-    noise_rates = robot_noise_rates(message, state.num_robots, state.noise_rate)
-
     if state.mode == 'entanglement':
-        await handle_measure_bell_pairs(websocket, state, noise_rates)
+        await handle_measure_bell_pairs(websocket, state)
         return
 
     robots = []
@@ -205,16 +176,33 @@ async def handle_measure(websocket, state, message):
     # than the averaged probability, so |0> lands on 0 deg and |1> on 180 deg.
     # Two measurements of the same H circuit can therefore disagree.
     for robot_id in range(state.num_robots):
-        outcome = engine.measure_once(state.gate, noise_rates[robot_id])
-        angle_error, fidelity = log_single_shot(state, state.gate, noise_rates[robot_id], outcome)
+        outcome = engine.measure_once(state.gate, state.noise_rate)
+        prob = outcome["prob"]
+        angle = outcome["angle"]
+        prob_error, angle_error = engine.calculate_error(state.gate, prob, angle)
+        fidelity = engine.calculate_fidelity(prob_error)
         fidelities.append(fidelity)
 
         robots.append({
             "id": robot_id,
-            "angle": outcome["angle"],
-            "prob": outcome["prob"],
+            "angle": angle,
+            "prob": prob,
             "error": angle_error,
         })
+
+        engine.log_to_csv(
+            prob=prob,
+            gate_name=state.gate,
+            angle=angle,
+            prob_error=prob_error,
+            angle_error=angle_error,
+            noise_rate=state.noise_rate,
+            num_robots=state.num_robots,
+            mode=state.mode,
+            fidelity=fidelity,
+            knowledge_level=state.knowledge_level,
+            shots=1,
+        )
 
     swarm_fidelity = sum(fidelities) / len(fidelities) if fidelities else 0.0
 
@@ -228,70 +216,13 @@ async def handle_measure(websocket, state, message):
     })
 
 
-def log_single_shot(state, gate, noise_rate, outcome):
-    """Log one robot's single-shot gate measurement; returns (angle_error, fidelity)."""
-    prob_error, angle_error = engine.calculate_error(gate, outcome["prob"], outcome["angle"])
-    fidelity = engine.calculate_fidelity(prob_error)
-    engine.log_to_csv(
-        prob=outcome["prob"],
-        gate_name=gate,
-        angle=outcome["angle"],
-        prob_error=prob_error,
-        angle_error=angle_error,
-        noise_rate=noise_rate,
-        num_robots=state.num_robots,
-        mode='superposition',
-        fidelity=fidelity,
-        knowledge_level=state.knowledge_level,
-        shots=1,
-    )
-    return angle_error, fidelity
-
-
-def bell_pair_robots(state, pair_index, outcome, noise_rate):
-    """Log both robots of one measured Bell pair and return their result dicts.
-
-    Each robot's ideal is its partner's outcome, so a robot's error is 0 when
-    the pair stayed correlated and 180 when decoherence broke it.
-    """
-    pair_fidelity = 1.0 if outcome["correlated"] else 0.0
-    members = (
-        (pair_index * 2, outcome["qubit_0"], outcome["angle_0"], outcome["angle_1"], outcome["qubit_1"]),
-        (pair_index * 2 + 1, outcome["qubit_1"], outcome["angle_1"], outcome["angle_0"], outcome["qubit_0"]),
-    )
-    robots = []
-    for robot_id, bit, angle, partner_angle, partner_bit in members:
-        angle_error = abs(angle - partner_angle)
-        robots.append({
-            "id": robot_id,
-            "angle": angle,
-            "prob": float(bit),
-            "error": angle_error,
-            "ideal_angle": partner_angle,
-        })
-        engine.log_to_csv(
-            prob=float(bit),
-            gate_name='bell',
-            angle=angle,
-            prob_error=float(abs(bit - partner_bit)),
-            angle_error=angle_error,
-            noise_rate=noise_rate,
-            num_robots=state.num_robots,
-            mode='entanglement',
-            fidelity=pair_fidelity,
-            knowledge_level=state.knowledge_level,
-            shots=1,
-            ideal_angle=partner_angle,
-        )
-    return robots
-
-
-async def handle_measure_bell_pairs(websocket, state, noise_rates):
+async def handle_measure_bell_pairs(websocket, state):
     """Measure each entangled pair with the Bell state circuit (one shot per pair).
 
     Both robots in a pair collapse together: in the noiseless case they land on
-    the same angle. Fidelity is the fraction of pairs that stayed correlated.
-    A pair runs at the higher of its two robots' noise rates. With an odd robot
+    the same angle. Each robot's ideal is its partner's outcome, so a robot's
+    error is 0 when the pair stayed correlated and 180 when decoherence broke it.
+    Fidelity is the fraction of pairs that stayed correlated. With an odd robot
     count the last robot has no partner and is not measured.
     """
     robots = []
@@ -299,11 +230,38 @@ async def handle_measure_bell_pairs(websocket, state, noise_rates):
     num_pairs = state.num_robots // 2
 
     for pair_index in range(num_pairs):
-        noise_rate = max(noise_rates[pair_index * 2], noise_rates[pair_index * 2 + 1])
-        outcome = engine.simulate_bell_state(noise_rate)
+        outcome = engine.simulate_bell_state(state.noise_rate)
         if outcome["correlated"]:
             correlated_pairs += 1
-        robots.extend(bell_pair_robots(state, pair_index, outcome, noise_rate))
+        pair_fidelity = 1.0 if outcome["correlated"] else 0.0
+
+        members = (
+            (pair_index * 2, outcome["qubit_0"], outcome["angle_0"], outcome["angle_1"], outcome["qubit_1"]),
+            (pair_index * 2 + 1, outcome["qubit_1"], outcome["angle_1"], outcome["angle_0"], outcome["qubit_0"]),
+        )
+        for robot_id, bit, angle, partner_angle, partner_bit in members:
+            angle_error = abs(angle - partner_angle)
+            robots.append({
+                "id": robot_id,
+                "angle": angle,
+                "prob": float(bit),
+                "error": angle_error,
+                "ideal_angle": partner_angle,
+            })
+            engine.log_to_csv(
+                prob=float(bit),
+                gate_name='bell',
+                angle=angle,
+                prob_error=float(abs(bit - partner_bit)),
+                angle_error=angle_error,
+                noise_rate=state.noise_rate,
+                num_robots=state.num_robots,
+                mode=state.mode,
+                fidelity=pair_fidelity,
+                knowledge_level=state.knowledge_level,
+                shots=1,
+                ideal_angle=partner_angle,
+            )
 
     await websocket.send_json({
         "type": "measurement_result",
@@ -314,48 +272,6 @@ async def handle_measure_bell_pairs(websocket, state, noise_rates):
         "mode": "entanglement",
         "pairs_total": num_pairs,
         "pairs_correlated": correlated_pairs,
-    })
-
-
-async def handle_measure_robot(websocket, state, message):
-    """Measure one robot's qubit with a single shot; the rest of the swarm is untouched.
-
-    The robots are independent qubits, so this is the same one-shot circuit a
-    full measurement runs for each robot, just for one of them. The noise rate
-    is the robot's own (local disturbance or the slider) and does not change
-    the session's noise rate.
-    """
-    robot_id = validate_index(message.get("id"), MAX_ROBOTS, "robot id")
-    gate = validate_gate(message.get("gate", state.gate))
-    noise_rate = clamp_noise(message.get("noise_rate", state.noise_rate))
-
-    outcome = engine.measure_once(gate, noise_rate)
-    log_single_shot(state, gate, noise_rate, outcome)
-
-    await websocket.send_json({
-        "type": "robot_measured",
-        "id": robot_id,
-        "outcome": outcome["bit"],
-        "angle": outcome["angle"],
-        "ideal_angle": engine.IDEAL_VALUES[gate]["angle"],
-        "noise_rate": noise_rate,
-    })
-
-
-async def handle_measure_pair(websocket, state, message):
-    """Measure one entangled pair with a single run of the Bell state circuit."""
-    pair_id = validate_index(message.get("pair_id"), MAX_ROBOTS // 2, "pair id")
-    noise_rate = clamp_noise(message.get("noise_rate", state.noise_rate))
-
-    outcome = engine.simulate_bell_state(noise_rate)
-    bell_pair_robots(state, pair_id, outcome, noise_rate)
-
-    await websocket.send_json({
-        "type": "pair_measured",
-        "pair_id": pair_id,
-        "outcome_a": outcome["qubit_0"],
-        "outcome_b": outcome["qubit_1"],
-        "noise_rate": noise_rate,
     })
 
 
