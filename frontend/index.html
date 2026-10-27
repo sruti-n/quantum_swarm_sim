@@ -958,7 +958,52 @@
       drawShape(r.x, r.y, (r.ghostDeg - 90) * Math.PI / 180, null, true);
     }
 
+    drawHalo(r);
     drawShape(r.x, r.y, r.heading, colorFor(r), false);
+  }
+
+  // ---------- click affordance ----------
+  // A robot that a click can measure wears a faint, slowly pulsing ring, so it
+  // reads as live; hovering brightens it. Measured robots have none. After the
+  // first Simulate of a page load one random robot pulses harder for a while,
+  // to hint that robots can be clicked.
+  var HALO_PERIOD_MS = 2600, HALO_GAP = 6;   // pulse period; px between body and ring
+  var SPOTLIGHT_MS = 8000, SPOTLIGHT_PERIOD_MS = 900;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var hoverRobot = null;
+  var spotlight = { used: false, robot: null, until: 0 };
+
+  function startSpotlight() {
+    if (spotlight.used || !state.robots.length) return;
+    spotlight.used = true;
+    spotlight.robot = state.robots[Math.floor(Math.random() * state.robots.length)];
+    spotlight.until = performance.now() + SPOTLIGHT_MS;
+  }
+
+  function hasHalo(r) {
+    if (state.phase === 'idle' || r.measured) return false;
+    // an unpaired robot in entanglement mode is not measured by a click
+    return state.mode !== 'entanglement' || !!partnerOf(r, groupPairs());
+  }
+
+  function drawHalo(r) {
+    if (!hasHalo(r)) return;
+    var now = performance.now();
+    var lit = spotlight.robot === r && now < spotlight.until;
+    var wave = reduceMotion ? 0.5
+      : 0.5 + 0.5 * Math.sin(now / (lit ? SPOTLIGHT_PERIOD_MS : HALO_PERIOD_MS) * Math.PI * 2);
+    var alpha = lit ? 0.35 + 0.4 * wave : 0.08 + 0.08 * wave;
+    if (r === hoverRobot) alpha = Math.max(alpha, 0.55);
+    var rad = shapeHalfLength() * vehicleScale() + HALO_GAP + wave * (lit ? 4 : 1.5);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = colorFor(r);
+    ctx.lineWidth = lit || r === hoverRobot ? 1.6 : 1;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, rad, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ---------- entanglement pair links ----------
@@ -1116,6 +1161,7 @@
   var PAIR_LEASH = 120;      // px; the leash reels partners back inside this
   var PAIR_LEASH_EASE = 0.2; // fraction of the excess reeled in per frame
   var PAIR_LEASH_STEP = 1.5; // px per robot per frame at most, so the reel never jumps
+  var PAIR_DRIVE = 0.03;     // shared push along the pair's heading, per frame
 
   function stepBoidsPair(r, partner, w, h) {
     // simplified Boids within a pair only; different pairs do not coordinate
@@ -1141,6 +1187,20 @@
     r.vy = r.vx * sj + r.vy * cj;
     r.vx = jvx;
 
+    // shared drive: both partners push along the lead robot's wander heading,
+    // so the pair travels as one. Without it, partners driving in opposite
+    // directions are a fixed point of alignment and the speed floor, and the
+    // spring and separation just bounce them back and forth on one spot.
+    var lead = r.id < partner.id ? r : partner;
+    if (r === lead) {
+      lead.wander += (Math.random() - 0.5) * 0.12;
+      // follow the pair's actual course, so a wall turns the drive with it
+      var mvx = r.vx + partner.vx, mvy = r.vy + partner.vy;
+      if (Math.hypot(mvx, mvy) > 0.2) lead.wander += angleDelta(lead.wander, Math.atan2(mvy, mvx)) * 0.03;
+    }
+    r.vx += Math.cos(lead.wander) * PAIR_DRIVE;
+    r.vy += Math.sin(lead.wander) * PAIR_DRIVE;
+
     avoidNeighbours(r, partner);   // steer around robots from other pairs
     steerFromEdges(r, w, h);
 
@@ -1148,6 +1208,7 @@
     var sp = Math.hypot(r.vx, r.vy), max = 1.5, min = 0.6;
     if (sp > max) { r.vx = r.vx / sp * max; r.vy = r.vy / sp * max; }
     else if (sp < min && sp > 0.001) { r.vx = r.vx / sp * min; r.vy = r.vy / sp * min; }
+    else if (sp <= 0.001) { r.vx = Math.cos(lead.wander) * min; r.vy = Math.sin(lead.wander) * min; }
     r.x += r.vx; r.y += r.vy;
     contain(r, w, h);
 
@@ -1488,16 +1549,14 @@
       state.simGate = msg.gate;
       state.noise = msg.noise_rate;
       if (state.robots.length !== msg.robots.length) rebuildRobots();
+      reprepareRobots();
       msg.robots.forEach(function (rd, i) {
         var r = state.robots[i];
         if (!r) return;
         r.prob = rd.prob;
         r.angleDeg = rd.angle;
-        r.ghostDeg = null;
-        r.targetHeading = null;
-        r.errorDeg = null;
-        r.measured = false;
       });
+      startSpotlight();
       setStatus('Robots are in superposition — state undefined.');
       setData({ gate: msg.gate, prob: null, angle: null, ideal: msg.ideal_angle,
                 error: null, noise: msg.noise_rate, fidelity: null,
@@ -1561,13 +1620,14 @@
       state.noise = msg.noise_rate;
       state.pairs = msg.pairs;
       if (!state.robots.length) rebuildRobots();
-      state.robots.forEach(function (r) { r.measured = false; });
+      reprepareRobots();
 
       msg.pairs.forEach(function (p) {
         var a = state.robots[p.a.id], b = state.robots[p.b.id];
-        if (a) { a.angleDeg = p.a.angle; a.targetHeading = (p.a.angle - 90) * Math.PI / 180; a.errorDeg = null; a.ghostDeg = null; }
-        if (b) { b.angleDeg = p.b.angle; b.targetHeading = (p.b.angle - 90) * Math.PI / 180; b.errorDeg = null; b.ghostDeg = null; }
+        if (a) a.angleDeg = p.a.angle;
+        if (b) b.angleDeg = p.b.angle;
       });
+      startSpotlight();
 
       var broken = msg.pairs.filter(function (p) { return !p.correlated; }).length;
       setStatus(broken > 0
@@ -1608,8 +1668,9 @@
 
   // A click measures one robot (or one Bell pair) with the ordinary measure
   // message, sized to just that robot or pair, so result i belongs to
-  // click.robots[i]. Everything else is left as it was. No tour event fires,
-  // so the tour still advances only on the Measure button and Space.
+  // click.robots[i]. Everything else is left as it was. It fires its own tour
+  // event, clickMeasured, so steps waiting on the Measure button or Space
+  // still advance only on those.
   function applyClickResult(click, msg) {
     var bell = msg.mode === 'entanglement';
     var gate = msg.gate || state.simGate;
@@ -1645,6 +1706,7 @@
       shots: 1,
       fidelity: state.fidelity
     });
+    tourEvent('clickMeasured', first);
   }
 
   // ---------- actions ----------
@@ -1723,14 +1785,10 @@
            shots: state.shots, mode: state.mode });
   }
 
-  // Return a measured robot to superposition. Robot qubits are independent, so
-  // in superposition only that robot goes back; in entanglement its partner
-  // collapsed with it, so the pair is re-entangled together. The next click
-  // runs a fresh circuit, so nothing needs to be sent to the backend here.
-  function resetRobot(r) {
-    var partner = state.mode === 'entanglement' ? partnerOf(r, groupPairs()) : null;
-    var group = partner ? [r, partner] : [r];
-    // a measured robot has all but stopped, so start it moving again (a pair together)
+  // Clear a robot's measured result and start it moving again. A measured robot
+  // has all but stopped (stepMeasured damps it), so it needs a fresh velocity;
+  // the robots of a group get the same one, so a pair sets off together.
+  function relaunch(group) {
     var t = Math.random() * Math.PI * 2;
     group.forEach(function (m) {
       m.measured = false;
@@ -1738,6 +1796,29 @@
       m.vx = Math.cos(t) * 1.2; m.vy = Math.sin(t) * 1.2;
       m.wander = t;
     });
+  }
+
+  // Every Simulate prepares fresh qubits, so every robot starts over: no result,
+  // snap target or collapse flash survives from the previous run. Robots are
+  // reused across runs, so without the relaunch a measured swarm stays frozen.
+  function reprepareRobots() {
+    linkFlashAt = 0;
+    pairFlashAt = {};
+    if (state.mode !== 'entanglement') {
+      state.robots.forEach(function (r) { relaunch([r]); });
+      return;
+    }
+    var byPair = groupPairs();
+    Object.keys(byPair).forEach(function (k) { relaunch(byPair[k]); });
+  }
+
+  // Return a measured robot to superposition. Robot qubits are independent, so
+  // in superposition only that robot goes back; in entanglement its partner
+  // collapsed with it, so the pair is re-entangled together. The next click
+  // runs a fresh circuit, so nothing needs to be sent to the backend here.
+  function resetRobot(r) {
+    var partner = state.mode === 'entanglement' ? partnerOf(r, groupPairs()) : null;
+    relaunch(partner ? [r, partner] : [r]);
     syncPhase();
     state.fidelity = measuredFidelity();
     setData({ prob: null, angle: null, error: null, fidelity: state.fidelity });
@@ -1937,7 +2018,7 @@
   // normal controls and reacts to the event that action produces (tourEvent is
   // called from doSimulate, handleMessage, setNoise, ...). Outside tour mode
   // tourEvent returns immediately, so free exploration is unchanged.
-  var TOUR_TOTAL_STEPS = 7;
+  var TOUR_TOTAL_STEPS = 8;
   var TOUR_ANIM_MS = 1100;   // let the measurement snap and pair-link flash finish before the card
 
   var tour = {
@@ -1948,7 +2029,8 @@
     timer: 0,
     wrongGate: null,     // gate of a superposition run made with something other than H
     noiseBase: 0,        // noise rate the decoherence step must rise above
-    pairs: null          // last Bell measurement, for the correlation count
+    pairs: null,         // last Bell measurement, for the correlation count
+    clicked: null        // last robot measured by a click during the clickOne step
   };
 
   var tourOverlay = $('tourOverlay'), tourCard = $('tourCard'), tourStepLabel = $('tourStepLabel');
@@ -2074,10 +2156,10 @@
         })];
       },
       footer: function () {
-        return "The result is random — run it again and you'll get a different outcome. Press S, then Space, to try. Click Continue when you're ready for entanglement.";
+        return "The result is random — run it again and you'll get a different outcome. Press S, then Space, to try. Click Continue when you're ready to measure one robot at a time.";
       },
-      primary: function () { return { label: 'Continue', go: 'entangle' }; },
-      prompt: function () { return 'Press S, then Space, to measure again and compare — or click Continue for entanglement.'; },
+      primary: function () { return { label: 'Continue', go: 'clickOne' }; },
+      prompt: function () { return 'Press S, then Space, to measure again and compare — or click Continue to measure one robot.'; },
       on: {
         simulate: hideTourCard,
         measure: hideTourCard,
@@ -2085,8 +2167,59 @@
       }
     },
 
-    entangle: {
+    clickOne: {
       n: 5,
+      title: 'Measure One Robot',
+      enter: function () { tour.clicked = null; },
+      body: function () {
+        var items = [byLevel({
+          beginner: "The Measure button looks at every robot at once. You can also look at just one: click a single robot. Here each robot has its own coin, so catching one coin doesn't stop the others spinning — they stay in superposition. Entangled robots are different: catching one also settles its partner, which you'll see next.",
+          intermediate: "Measuring one qubit of a product state leaves the others untouched: each robot's qubit is independent, so the rest stay in superposition. In an entangled pair the qubits share one state, so measuring one collapses its partner too — the pair always lands on |00⟩ or |11⟩ together.",
+          advanced: "For a product state ρ₁⊗…⊗ρₙ, a projective measurement on qubit k leaves the reduced state of every other qubit unchanged. For |Φ⁺⟩ the post-measurement state is |bb⟩: measuring qubit A with outcome b projects B onto |b⟩, while B's marginal stays I/2 to anyone who hasn't learned b — no signal passes between them."
+        })];
+        var c = tour.clicked;
+        if (c) {
+          items.push({ live: 'Robot ' + c.id + ' landed on ' + c.angle + '°. ' + c.open +
+            (c.open === 1 ? ' robot is' : ' robots are') + ' still in superposition.' });
+        }
+        return items;
+      },
+      footer: function () {
+        return tour.clicked
+          ? 'Click another robot, or click a measured one to put it back in superposition. Click Continue for entanglement.'
+          : TOUR_STEPS.clickOne.prompt();
+      },
+      primary: function () {
+        return tour.clicked ? { label: 'Continue', go: 'entangle' } : { label: 'Got it', hide: true };
+      },
+      prompt: function () {
+        if (state.mode === 'entanglement') {
+          return "You're in Entanglement mode. Click Superposition (or press E), press S, then click one robot.";
+        }
+        var live = state.phase !== 'idle' && state.robots.some(function (r) { return !r.measured; });
+        return live
+          ? 'Click one robot with a faint ring to measure just that robot.'
+          : 'Press S to prepare the robots again, then click a single robot instead of using Measure.';
+      },
+      on: {
+        simulate: hideTourCard,
+        measure: hideTourCard,
+        superState: function () { renderTour(); },
+        mode: function (m) { if (m === 'entanglement') goTourStep('entangle'); else renderTour(); },
+        clickMeasured: function (r) {
+          if (state.mode === 'entanglement') return;
+          tour.clicked = {
+            id: r.id + 1,
+            angle: r.angleDeg,
+            open: state.robots.filter(function (o) { return !o.measured; }).length
+          };
+          afterTourAnimation(showTourCard);
+        }
+      }
+    },
+
+    entangle: {
+      n: 6,
       title: 'Entangle the Robots',
       body: function () {
         return [byLevel({
@@ -2110,7 +2243,7 @@
     },
 
     entangled: {
-      n: 5,
+      n: 6,
       title: 'Entanglement',
       body: function () { return [COPY[state.level].entangled]; },
       footer: function () {
@@ -2130,7 +2263,7 @@
     },
 
     correlated: {
-      n: 5,
+      n: 6,
       title: 'Correlated Outcomes',
       enter: function () { tour.noiseBase = state.noise; },
       body: function () {
@@ -2162,7 +2295,7 @@
     },
 
     decoherence: {
-      n: 6,
+      n: 7,
       title: 'Decoherence',
       body: function () {
         return [byLevel({
@@ -2184,7 +2317,7 @@
     },
 
     complete: {
-      n: 7,
+      n: 8,
       title: 'Tour Complete',
       body: function () {
         return ["You've explored the three ideas at the heart of quantum computing:", { list: byLevel({
@@ -2377,9 +2510,10 @@
     if (r) clickRobot(r);
   });
   canvas.addEventListener('mousemove', function (e) {
-    canvas.style.cursor = state.phase !== 'idle' && robotAt(e) ? 'pointer' : '';
+    hoverRobot = state.phase !== 'idle' ? robotAt(e) : null;
+    canvas.style.cursor = hoverRobot ? 'pointer' : '';
   });
-  canvas.addEventListener('mouseleave', function () { canvas.style.cursor = ''; });
+  canvas.addEventListener('mouseleave', function () { hoverRobot = null; canvas.style.cursor = ''; });
 
   btnSimulate.addEventListener('click', doSimulate);
   btnMeasure.addEventListener('click', doMeasure);
