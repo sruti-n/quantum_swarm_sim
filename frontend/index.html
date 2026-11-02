@@ -763,17 +763,28 @@
     return list.every(function (o) { return Math.hypot(o.x - x, o.y - y) >= clear; });
   }
 
+  // In entanglement mode each pair picks at random how it starts: side by side
+  // at the pair spacing, or split, with one partner in each half of the canvas.
+  // A split pair begins with a long link and the pair spring and leash draw
+  // the partners together once Simulate runs; overlap resolution keeps them
+  // from passing through other robots on the way.
+  var PAIR_SPLIT_CHANCE = 0.5;
+
   function rebuildRobots() {
     var w = viewW() || 600, h = viewH() || 420;
-    var list = [];
+    var list = [], split = false;
     for (var i = 0; i < state.count; i++) {
       var r = makeRobot(i, state.count);
-      // In entanglement mode each robot spawns beside its partner, already at
-      // the pair spacing; spawned at random the pair leash would have to drag
-      // partners across the canvas, through the other robots.
       var mate = state.mode === 'entanglement' && i % 2 === 1 ? list[i - 1] : null;
+      // the pair's first robot decides how the pair starts
+      if (state.mode === 'entanglement' && i % 2 === 0) split = i + 1 < state.count && Math.random() < PAIR_SPLIT_CHANCE;
       for (var tries = 0; tries < SPAWN_TRIES; tries++) {
-        if (mate) {
+        if (split) {
+          // one partner in each half, both kept off the center line
+          var left = mate ? mate.x >= w / 2 : Math.random() < 0.5;
+          r.x = w * ((left ? 0.15 : 0.55) + 0.3 * Math.random());
+          r.y = h * (0.2 + 0.6 * Math.random());
+        } else if (mate) {
           var t = Math.random() * Math.PI * 2;
           r.x = mate.x + Math.cos(t) * PAIR_REST;
           r.y = mate.y + Math.sin(t) * PAIR_REST;
