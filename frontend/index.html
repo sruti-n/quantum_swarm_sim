@@ -750,7 +750,21 @@
     };
   }
 
+  // Spawn positions are rejection-sampled: a spot that overlaps a robot already
+  // placed (or sits outside the walls) is re-rolled, up to SPAWN_TRIES times.
+  // If every try fails, the last one stands and resolveOverlaps separates the
+  // robots on the first step.
+  var SPAWN_TRIES = 50;
+  var SPAWN_GAP = 6;   // px of clearance beyond touching, so robots don't start pressed together
+
+  function spawnClear(x, y, list, w, h) {
+    if (x < BOUNCE_INSET || x > w - BOUNCE_INSET || y < BOUNCE_INSET || y > h - BOUNCE_INSET) return false;
+    var clear = bodyLength() + SPAWN_GAP;
+    return list.every(function (o) { return Math.hypot(o.x - x, o.y - y) >= clear; });
+  }
+
   function rebuildRobots() {
+    var w = viewW() || 600, h = viewH() || 420;
     var list = [];
     for (var i = 0; i < state.count; i++) {
       var r = makeRobot(i, state.count);
@@ -758,12 +772,18 @@
       // the pair spacing; spawned at random the pair leash would have to drag
       // partners across the canvas, through the other robots.
       var mate = state.mode === 'entanglement' && i % 2 === 1 ? list[i - 1] : null;
-      if (mate) {
-        var t = Math.random() * Math.PI * 2;
-        r.x = mate.x + Math.cos(t) * PAIR_REST;
-        r.y = mate.y + Math.sin(t) * PAIR_REST;
-        r.vx = mate.vx; r.vy = mate.vy;
+      for (var tries = 0; tries < SPAWN_TRIES; tries++) {
+        if (mate) {
+          var t = Math.random() * Math.PI * 2;
+          r.x = mate.x + Math.cos(t) * PAIR_REST;
+          r.y = mate.y + Math.sin(t) * PAIR_REST;
+        } else {
+          r.x = w * (0.2 + 0.6 * Math.random());
+          r.y = h * (0.2 + 0.6 * Math.random());
+        }
+        if (spawnClear(r.x, r.y, list, w, h)) break;
       }
+      if (mate) { r.vx = mate.vx; r.vy = mate.vy; }
       list.push(r);
     }
     state.robots = list;
@@ -1108,7 +1128,7 @@
 
   // Unentangled qubits share no state, so in superposition each robot wanders on
   // its own: no cohesion, no alignment, no steering around neighbours. The only
-  // contact between robots is the overlap separation below, when bodies touch.
+  // contact between robots is the short-range separation below, at touching.
   function stepSuperposition(r, w, h) {
     r.wander += (Math.random() - 0.5) * 0.45;
     r.vx += Math.cos(r.wander) * 0.09;
@@ -1185,42 +1205,74 @@
     r.heading += angleDelta(r.heading, Math.atan2(r.vy, r.vx)) * 0.15;
   }
 
-  // Separation acts only when two bodies actually overlap: centers closer than
-  // one body length. The push is zero at first contact and grows with the
-  // square of the overlap, so robots that brush past each other barely react
-  // and only deep overlaps are eased apart, over several frames.
-  var SEPARATION_EASE = 0.2;    // fraction of the overlap resolved per frame at full overlap
-  var SEPARATION_DRIFT = 0.3;   // how much of the push carries into velocity
-
+  // Robots never overlap. Each has a collision radius of half its body length,
+  // so two bodies touch when their centers are one body length apart.
   function bodyLength() { return shapeHalfLength() * 2 * vehicleScale(); }
 
-  function applySeparation(w, h) {
-    var rs = state.robots, reach = bodyLength();
+  // Soft separation, only just outside contact: within SEPARATION_BAND px of
+  // touching, a robot is nudged away from the other, harder the closer it gets,
+  // so robots visibly swerve around each other instead of bumping. Nothing acts
+  // beyond the band. A measured robot is held still, so it is never nudged.
+  var SEPARATION_BAND = 10;      // px past touching where the nudge starts
+  var SEPARATION_STEER = 0.25;   // velocity nudge at contact, fading to 0 at the band's edge
+
+  function steerApart() {
+    var rs = state.robots, reach = bodyLength(), edge = reach + SEPARATION_BAND;
     for (var i = 0; i < rs.length; i++) {
       for (var j = i + 1; j < rs.length; j++) {
         var a = rs[i], b = rs[j];
-        var dx = b.x - a.x, dy = b.y - a.y;
-        var d = Math.hypot(dx, dy);
-        if (d >= reach) continue;
-        if (d < 0.001) {
-          // exactly coincident: no direction to separate along, so pick one
-          var t = Math.random() * Math.PI * 2;
-          dx = Math.cos(t); dy = Math.sin(t); d = 1;
-        }
+        var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+        if (d >= edge || d < 0.001) continue;
         var ux = dx / d, uy = dy / d;
-        var overlap = reach - d;
-        var push = overlap * SEPARATION_EASE * (overlap / reach);
-        a.x -= ux * push; a.y -= uy * push;
-        b.x += ux * push; b.y += uy * push;
-        // carrying part of the push into velocity keeps them drifting apart
-        a.vx -= ux * push * SEPARATION_DRIFT; a.vy -= uy * push * SEPARATION_DRIFT;
-        b.vx += ux * push * SEPARATION_DRIFT; b.vy += uy * push * SEPARATION_DRIFT;
+        var k = SEPARATION_STEER * Math.min(1, (edge - d) / SEPARATION_BAND);
+        if (!a.measured) { a.vx -= ux * k; a.vy -= uy * k; }
+        if (!b.measured) { b.vx += ux * k; b.vy += uy * k; }
       }
     }
-    for (var k = 0; k < rs.length; k++) contain(rs[k], w, h);
   }
 
-  // The pairing is a constraint, not just a force: it runs after separation, so
+  // Hard overlap resolution, run once every robot has moved: two robots closer
+  // than the sum of their collision radii are moved apart along the line between
+  // their centers by the whole overlap. Two moving robots split it; a measured
+  // robot is held still, so the other takes all of it. A robot stopped short by
+  // a wall can't take its full share, so the other takes the rest. Parting one
+  // pair can push a robot into a third, so the pass repeats to settle clusters.
+  var OVERLAP_PASSES = 3;
+
+  // Move r up to dist along (ux, uy), staying inside the walls; returns how far
+  // it actually got along that line.
+  function shove(r, ux, uy, dist, w, h) {
+    if (dist <= 0) return 0;
+    var x0 = r.x, y0 = r.y;
+    r.x += ux * dist; r.y += uy * dist;
+    contain(r, w, h);
+    return Math.max(0, (r.x - x0) * ux + (r.y - y0) * uy);
+  }
+
+  function resolveOverlaps(w, h) {
+    var rs = state.robots, reach = bodyLength();
+    for (var pass = 0; pass < OVERLAP_PASSES; pass++) {
+      for (var i = 0; i < rs.length; i++) {
+        for (var j = i + 1; j < rs.length; j++) {
+          var a = rs[i], b = rs[j];
+          var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+          if (d >= reach) continue;
+          var ux, uy;
+          if (d < 0.001) {
+            // exactly coincident: no direction to separate along, so pick one
+            var t = Math.random() * Math.PI * 2;
+            ux = Math.cos(t); uy = Math.sin(t); d = 0;
+          } else { ux = dx / d; uy = dy / d; }
+          var overlap = reach - d;
+          var aShare = a.measured && !b.measured ? 0 : b.measured && !a.measured ? overlap : overlap / 2;
+          var moved = shove(a, -ux, -uy, aShare, w, h);
+          shove(b, ux, uy, overlap - moved, w, h);
+        }
+      }
+    }
+  }
+
+  // The pairing is a constraint, not just a force: it runs after movement, so
   // however hard other robots push, partners past PAIR_LEASH are reeled back and
   // lose the velocity that was carrying them apart. A pair never comes apart
   // physically; noise only shows on the link (see drawPairLinks).
@@ -1289,6 +1341,8 @@
       r.prevX = r.x; r.prevY = r.y; r.prevHeading = r.heading;
     });
 
+    if (state.phase !== 'idle') steerApart();
+
     // Each robot moves by its own state: a measured robot holds its result.
     state.robots.forEach(function (r) {
       if (state.phase === 'idle') return;
@@ -1301,10 +1355,12 @@
       } else stepSuperposition(r, w, h);
     });
 
-    // Positions are final for this step only after separation and the pair
-    // leash have resolved, so they run before the trail records each robot.
-    applySeparation(w, h);
+    // Positions are final for this step only after the pair leash and overlap
+    // resolution, so they run before the trail records each robot. Overlap
+    // resolution runs last, so nothing moves a robot back into another. It runs
+    // while idle too, so a robot is never left overlapping at rest.
     applyPairLeash(byPair, w, h);
+    resolveOverlaps(w, h);
 
     state.robots.forEach(function (r) {
       if (state.phase !== 'idle') {
