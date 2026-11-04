@@ -27,6 +27,10 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     font-size: 14px;
     line-height: 1.5;
+    /* column, so the credit can sit at the bottom of a window taller than the page */
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
   header {
@@ -64,25 +68,34 @@
     white-space: nowrap;
   }
 
+  /* Layout: one 16px gap everywhere. The canvas and the controls panel share a
+     single fixed-height row, so neither leaves an empty band beside the other;
+     the controls scroll inside that height (e.g. with Robot Design open)
+     instead of stretching the row. The row height fills the window below the
+     header, within 420–680px. */
+  :root { --gap: 16px; --row-h: clamp(420px, calc(100vh - 100px), 680px); }
+
   .main {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 290px;
-    gap: 16px;
-    padding: 16px 20px;
+    grid-template-rows: var(--row-h);
+    gap: var(--gap);
+    padding: var(--gap) 20px 0;
   }
 
-  .main { align-items: start; }
-
-  /* Own height (not stretched to the controls panel) so opening Robot Design
-     doesn't resize the simulation; sticky so it stays in view while editing. */
   .canvas-wrap {
-    position: sticky;
-    top: 16px;
+    position: relative;
+    min-width: 0;
     background: #02040a;
     border: 1px solid var(--line);
     border-radius: 10px;
     overflow: hidden;
-    height: clamp(420px, 62vh, 680px);
+  }
+
+  .main > .panel {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -138,10 +151,6 @@
   .shape-msg { font-size: 11.5px; margin-top: 8px; line-height: 1.4; min-height: 1em; overflow-wrap: anywhere; }
   .shape-msg.err { color: var(--red); }
   .shape-msg.ok { color: var(--green); }
-
-  @media (max-width: 860px) {
-    .canvas-wrap { position: relative; top: auto; height: 420px; }
-  }
 
   .panel {
     background: var(--panel);
@@ -220,7 +229,7 @@
     line-height: 1.35;
   }
 
-  .lower { padding: 0 20px 20px; display: grid; gap: 16px; }
+  .lower { padding: var(--gap) 20px 0; display: grid; gap: var(--gap); }
 
   .level-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
   .level-toggle button { flex: 1; }
@@ -297,8 +306,10 @@
 
   .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
 
+  /* In normal flow after the panels, so it sits bottom-left and never overlaps them. */
   .credit {
-    padding: 0 20px 16px;
+    margin-top: auto;
+    padding: var(--gap) 20px;
     font-size: 11px;
     color: rgba(255,255,255,0.45);
   }
@@ -358,8 +369,10 @@
   }
   #connDot.on { background: var(--green); }
 
+  /* Narrow windows stack canvas over controls; the controls take their natural height. */
   @media (max-width: 860px) {
-    .main { grid-template-columns: 1fr; }
+    .main { grid-template-columns: 1fr; grid-template-rows: 420px auto; }
+    .main > .panel { overflow-y: visible; }
   }
 
   /* ---------- guided tour ----------
@@ -715,12 +728,31 @@
   var loadingOverlay = $('loadingOverlay'), loadingTitle = $('loadingTitle'), loadingDetail = $('loadingDetail');
 
   // ---------- canvas sizing ----------
+  // The bitmap matches the canvas element's own box (inside the wrapper's
+  // border), re-read on every resize along with the pixel ratio (zoom or a
+  // move to another display changes it).
   var dpr = window.devicePixelRatio || 1;
   function resize() {
-    var r = canvas.parentElement.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(r.width * dpr));
-    canvas.height = Math.max(1, Math.floor(r.height * dpr));
+    dpr = window.devicePixelRatio || 1;
+    var r = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(r.width * dpr));
+    canvas.height = Math.max(1, Math.round(r.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    keepRobotsInside(viewW(), viewH());
+  }
+
+  // When the canvas shrinks, robots past the new walls are moved just inside
+  // them. Moving robots would also be bounced back on their next step, but idle
+  // and measured robots are never bounced, so without this they would stay off
+  // screen. A moved robot's trail is cleared so it doesn't streak.
+  function keepRobotsInside(w, h) {
+    var lo = BOUNCE_INSET, hiX = Math.max(lo, w - BOUNCE_INSET), hiY = Math.max(lo, h - BOUNCE_INSET);
+    state.robots.forEach(function (r) {
+      var x = Math.max(lo, Math.min(hiX, r.x)), y = Math.max(lo, Math.min(hiY, r.y));
+      if (x === r.x && y === r.y) return;
+      r.x = r.prevX = x; r.y = r.prevY = y;
+      r.trail = [];
+    });
   }
   window.addEventListener('resize', resize);
   if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
