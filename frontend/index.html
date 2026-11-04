@@ -1171,7 +1171,7 @@
 
   // Unentangled qubits share no state, so in superposition each robot wanders on
   // its own: no cohesion, no alignment, no steering around neighbours. The only
-  // contact between robots is the short-range separation below, at touching.
+  // contact between robots is the hard overlap resolution (resolveOverlaps).
   function stepSuperposition(r, w, h) {
     r.wander += (Math.random() - 0.5) * 0.45;
     r.vx += Math.cos(r.wander) * 0.09;
@@ -1251,28 +1251,6 @@
   // Robots never overlap. Each has a collision radius of half its body length,
   // so two bodies touch when their centers are one body length apart.
   function bodyLength() { return shapeHalfLength() * 2 * vehicleScale(); }
-
-  // Soft separation, only just outside contact: within SEPARATION_BAND px of
-  // touching, a robot is nudged away from the other, harder the closer it gets,
-  // so robots visibly swerve around each other instead of bumping. Nothing acts
-  // beyond the band. A measured robot is held still, so it is never nudged.
-  var SEPARATION_BAND = 10;      // px past touching where the nudge starts
-  var SEPARATION_STEER = 0.25;   // velocity nudge at contact, fading to 0 at the band's edge
-
-  function steerApart() {
-    var rs = state.robots, reach = bodyLength(), edge = reach + SEPARATION_BAND;
-    for (var i = 0; i < rs.length; i++) {
-      for (var j = i + 1; j < rs.length; j++) {
-        var a = rs[i], b = rs[j];
-        var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
-        if (d >= edge || d < 0.001) continue;
-        var ux = dx / d, uy = dy / d;
-        var k = SEPARATION_STEER * Math.min(1, (edge - d) / SEPARATION_BAND);
-        if (!a.measured) { a.vx -= ux * k; a.vy -= uy * k; }
-        if (!b.measured) { b.vx += ux * k; b.vy += uy * k; }
-      }
-    }
-  }
 
   // Hard overlap resolution, run once every robot has moved: two robots closer
   // than the sum of their collision radii are moved apart along the line between
@@ -1383,8 +1361,6 @@
     state.robots.forEach(function (r) {
       r.prevX = r.x; r.prevY = r.y; r.prevHeading = r.heading;
     });
-
-    if (state.phase !== 'idle') steerApart();
 
     // Each robot moves by its own state: a measured robot holds its result.
     state.robots.forEach(function (r) {
