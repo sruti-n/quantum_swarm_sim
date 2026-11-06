@@ -17,7 +17,7 @@ screen reflects genuine simulated quantum behavior. The system is designed as a
 pedagogical tool for quantum computing education, engaging users at the Analyze
 and Evaluate levels of Bloom's Taxonomy: users select gates, adjust the noise
 rate, trigger measurement, and observe the consequences of their choices rather
-than passively watching an animation. Stage 2 of the project extends this work
+than passively watching an animation. Stage 3 of the project extends this work
 to a physical robot prototype.
 
 ## About This Project
