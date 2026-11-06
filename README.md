@@ -91,6 +91,45 @@ with abstract concepts produces deeper understanding than passive instruction.
   correction. *Proceedings of the Royal Society of London. Series A,
   452*(1954), 2551–2577. <https://doi.org/10.1098/rspa.1996.0136>
 
+## Project Evolution
+
+This project lives in a single repository, and each stage of its development is
+preserved as a git tag.
+
+1. **[`stage-1-initial-build`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-1-initial-build)**:
+   The first working version, with a FastAPI and Qiskit backend, a browser
+   canvas frontend with an explanation panel, and a complete README.
+2. **[`stage-2-usability-fixes`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-2-usability-fixes)**:
+   Added a loading state and reduced the number of shots so simulations return
+   results faster.
+3. **[`stage-3-braitenberg-robots`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-3-braitenberg-robots)**:
+   Redesigned the robots as Braitenberg-style directional vehicles that face
+   their direction of travel, and allowed a swarm of a single robot.
+4. **[`stage-4-custom-shape-loader`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-4-custom-shape-loader)**:
+   Added a two-tier loader for custom robot shapes, with an option to reset to
+   the built-in Braitenberg vehicle.
+5. **[`stage-5-probabilistic-measurement`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-5-probabilistic-measurement)**:
+   Added separation physics between robots and made measurement outcomes
+   genuinely probabilistic.
+6. **[`stage-6-entanglement-lines`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-6-entanglement-lines)**:
+   Joined each entangled pair with an animated dashed line that shifts from gold
+   to red as noise rises and flashes on measurement.
+7. **[`stage-7-live-deployment`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-7-live-deployment)**:
+   Pointed the frontend at the production backend so the simulation runs live
+   on the web.
+8. **[`stage-8-guided-tour`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-8-guided-tour)**:
+   Added a guided tour mode whose overlay cards adapt their explanations to the
+   chosen knowledge level.
+9. **[`stage-9-correctness-fixes`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-9-correctness-fixes)**:
+   Corrected the decoherence color logic, made robots in superposition move
+   independently, and stabilized the motion of entangled pairs.
+10. **[`stage-10-final-polish`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-10-final-polish)**:
+    Removed the soft repulsion between robots while keeping hard overlap
+    prevention, so robots never pass through one another.
+
+The original Arduino-servo prototype, including the servo sketches and early
+Qiskit test scripts, lives in the [`legacy/`](legacy/) folder.
+
 ## How to Run
 
 **Live demo:** <https://sruti-n.github.io/quantum_swarm_sim> — no installation
