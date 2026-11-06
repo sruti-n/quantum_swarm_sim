@@ -126,6 +126,10 @@ preserved as a git tag.
 10. **[`stage-10-final-polish`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-10-final-polish)**:
     Removed the soft repulsion between robots while keeping hard overlap
     prevention, so robots never pass through one another.
+11. **[`stage-11-distance-independent-entanglement`](https://github.com/sruti-n/quantum_swarm_sim/tree/stage-11-distance-independent-entanglement)**:
+    Removed every force coupling entangled partners, so each pair starts split
+    across the canvas and its partners wander independently at any distance
+    while their measurement outcomes stay correlated.
 
 The original Arduino-servo prototype, including the servo sketches and early
 Qiskit test scripts, lives in the [`legacy/`](legacy/) folder.
