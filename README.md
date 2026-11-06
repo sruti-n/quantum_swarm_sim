@@ -4,7 +4,7 @@
 
 ## Overview
 
-This repository contains the quantum swarm simulation, Stage 1 of a two-stage
+This repository contains the quantum swarm simulation, Stage 2 of a three-stage
 research project investigating how abstract quantum phenomena can be made
 physically legible to learners with no quantum background. The simulation
 models a swarm of robots in which each robot acts as a physical analog of a
